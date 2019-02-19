@@ -27,8 +27,6 @@ class Annotator(ABC):
         return hash(self.get_cache_name())
 
     def get_cache_name(self):
-        if not isinstance(self.columns, list):
-            raise ValueError("Columns was not a list")
         if hasattr(self, "cache_name"):
             return self.cache_name
         else:
@@ -37,7 +35,7 @@ class Annotator(ABC):
     def calc(self, df):
         raise NotImplementedError()
 
-    def deps(self):
+    def deps(self, ddf):
         """Return ppg.jobs"""
         return []
 

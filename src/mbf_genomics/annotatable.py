@@ -69,6 +69,15 @@ class DelayedDataFrame(object):
         else:
             return NotImplemented
 
+    def add_annotator(self, anno):
+        """Sugar for
+        self += anno
+        return self.anno_jobs[anno.get_cache_name()]
+        """
+        self += anno
+        if self.load_strategy.build_deps:  # pragma: no branch
+            return self.anno_jobs[anno.get_cache_name()]
+
     @property
     def root(self):
         x = self
@@ -105,7 +114,14 @@ class DelayedDataFrame(object):
         """
 
         def load():
-            return self.df[df_filter_function(self.df)][self.non_annotator_columns]
+            idx_or_bools = df_filter_function(self.df)
+            if isinstance(idx_or_bools, pd.Index):
+                res = self.df.loc[idx_or_bools][self.non_annotator_columns]
+                res = res.assign(parent_row=idx_or_bools)
+            else:
+                res = self.df[idx_or_bools][self.non_annotator_columns]
+                res = res.assign(parent_row=self.df.index[idx_or_bools])
+            return res
 
         if dependencies is None:
             dependencies = []
@@ -229,11 +245,15 @@ class Load_Direct:
             a_df = self.ddf.parent.df.loc[self.ddf.df.index]
             a_df = a_df[s_should]
         else:
+            if not isinstance(anno.columns, list):
+                raise ValueError("Columns was not a list")
             a_df = anno.calc(self.ddf.df)
         if isinstance(a_df, pd.Series) and len(s_should) == 1:
             a_df = pd.DataFrame({next(iter(s_should)): a_df})
         elif not isinstance(a_df, pd.DataFrame):
-            raise ValueError("Annotator return non DataFrame result (nor a Series and len(anno.columns) == 1)")
+            raise ValueError(
+                "Annotator return non DataFrame result (nor a Series and len(anno.columns) == 1)"
+            )
         s_actual = set(a_df.columns)
         if s_should != s_actual:
             raise ValueError(
@@ -290,8 +310,8 @@ class Load_PPG:
             and not self.ddf.annotators[cache_name] is anno
         ):
             raise ValueError(
-                "Trying to add two different Annotator objects with identical cache names to %s"
-                % self.ddf.name
+                "Trying to add two different Annotator objects with identical cache names (%s) to %s"
+                % (cache_name, self.ddf.name)
             )
         if not cache_name in self.ddf.annotators:
             # if not hasattr(anno, "columns"): # handled by get_cache_name
@@ -387,6 +407,9 @@ class Load_PPG:
 
     def _anno_cache_and_calc(self, anno):
         def calc():
+            if not isinstance(anno.columns, list):
+                raise ValueError("Columns was not a list")
+
             df = anno.calc(self.ddf.df)
             if isinstance(df, pd.Series) and len(anno.columns) == 1:
                 df = pd.DataFrame({anno.columns[0]: df})
@@ -428,6 +451,9 @@ class Load_PPG:
         job = ppg.CachedDataLoadingJob(
             self.ddf.cache_dir / anno.get_cache_name(), calc, load
         )
+        ppg.Job.depends_on(
+            job, self.load()
+        )  # both the load and nthe calc needs our ddf.df
         job.depends_on(
             self.load(),
             ppg.FunctionInvariant(
@@ -436,8 +462,8 @@ class Load_PPG:
         )
         for d in anno.dep_annos():
             job.depends_on(self.ddf.anno_jobs[d.get_cache_name()])
-        job.depends_on(anno.deps())
+        job.depends_on(anno.deps(self.ddf))
         return job
 
     def annotate(self):
-        return self.ddf.anno_jobs.values()
+        return lambda: self.ddf.anno_jobs.values()

@@ -18,6 +18,12 @@ class LenAnno(Annotator):
         )
 
 
+def force_load(ddf, annotate=True):
+    ppg.JobGeneratingJob("shu", lambda: 55).depends_on(
+        ddf.annotate() if annotate else ddf.load()
+    )
+
+
 @pytest.mark.usefixtures("no_pipegraph")
 @pytest.mark.usefixtures("clear_annotators")
 class Test_DelayedDataFrameDirect:
@@ -132,9 +138,6 @@ class Test_DelayedDataFrameDirect:
             def calc(self, df):
                 return pd.DataFrame({"shu": self.value}, index=df.index)
 
-            def deps(self):
-                return []
-
         a = DelayedDataFrame(
             "shu", lambda: pd.DataFrame({"A": [1, 2], "B": ["c", "d"]})
         )
@@ -150,29 +153,14 @@ class Test_DelayedDataFrameDirect:
         class MissingCalc(Annotator):
             column_names = ["shu"]
 
-            def deps(self):
-                return []
-
         with pytest.raises(AttributeError):
             a += MissingCalc()
-
-        class MissingDeps(Annotator):
-            column_names = ["shu"]
-
-            def calc(self, df):
-                pass
-
-        with pytest.raises(AttributeError):
-            a += MissingDeps()
 
         class EmptyColumnNames(Annotator):
             columns = []
 
             def calc(self, df):
                 return pd.DataFrame({})
-
-            def deps(self):
-                return []
 
         with pytest.raises(IndexError):
             a += EmptyColumnNames()
@@ -184,9 +172,6 @@ class Test_DelayedDataFrameDirect:
             def calc(self, df):
                 return pd.DataFrame({})
 
-            def deps(self):
-                return []
-
         with pytest.raises(IndexError):
             a += EmptyColumnNamesButCacheName()
 
@@ -194,11 +179,17 @@ class Test_DelayedDataFrameDirect:
             def calc(self, df):
                 pass
 
-            def deps(self):
-                return []
-
         with pytest.raises(AttributeError):
             a += MissingColumnNames()
+
+        class NonListColumns(Annotator):
+            columns = "shu"
+
+            def calc(self, df):
+                pass
+
+        with pytest.raises(ValueError):
+            a += NonListColumns()
 
     def test_DynamicColumNames(self):
         a = DelayedDataFrame(
@@ -231,9 +222,6 @@ class Test_DelayedDataFrameDirect:
             def calc(self, df):
                 return pd.DataFrame({self.columns[0]: self.value}, index=df.index)
 
-            def deps(self):
-                return []
-
         a = DelayedDataFrame(
             "shu", lambda: pd.DataFrame({"A": [1, 2], "B": ["c", "d"]})
         )
@@ -255,9 +243,6 @@ class Test_DelayedDataFrameDirect:
 
             def calc(self, df):
                 return pd.DataFrame({self.columns[0]: self.value}, index=df.index)
-
-            def deps(self):
-                return []
 
         a = DelayedDataFrame(
             "shu", lambda: pd.DataFrame({"A": [1, 2], "B": ["c", "d"]})
@@ -538,7 +523,7 @@ class Test_DelayedDataFramePPG:
 
         a = DelayedDataFrame("shu", load)
         assert not hasattr(a, "df")
-        ppg.JobGeneratingJob("shu", lambda: 55).depends_on(a.load())
+        force_load(a, False)
         ppg.run_pipegraph()
         assert_frame_equal(a.df, test_df)
         assert a.non_annotator_columns == "A"
@@ -560,7 +545,7 @@ class Test_DelayedDataFramePPG:
             "shu", lambda: pd.DataFrame({"A": [1, 2], "B": ["c", "d"]})
         )
         a += Constant("aa", "aa")
-        ppg.JobGeneratingJob("shu", lambda: 55).depends_on(a.annotate())
+        force_load(a)
         ppg.run_pipegraph()
         assert (a.df["aa"] == "aa").all()
 
@@ -576,12 +561,9 @@ class Test_DelayedDataFramePPG:
             def calc(self, df):
                 raise ValueError("hello")
 
-            def deps(self):
-                return []
-
         anno1 = RaiseAnno()
         a += anno1
-        ppg.JobGeneratingJob("shu", lambda: 55).depends_on(a.annotate())
+        force_load(a)
         with pytest.raises(ppg.RuntimeError):
             ppg.run_pipegraph()
         anno_job = a.anno_jobs[RaiseAnno().get_cache_name()]
@@ -597,8 +579,15 @@ class Test_DelayedDataFramePPG:
                     {self.columns[0]: ["%s%i" % (self.columns[0], len(df))] * len(df)}
                 )
 
-        with pytest.raises(ValueError):
-            BrokenAnno().get_cache_name()
+        a = DelayedDataFrame(
+            "shu", lambda: pd.DataFrame({"A": [1, 2], "B": ["c", "d"]})
+        )
+        a += BrokenAnno()
+        lg = a.anno_jobs[BrokenAnno().get_cache_name()]
+        force_load(a)
+        with pytest.raises(ppg.RuntimeError):
+            ppg.run_pipegraph()
+        assert "list" in str(lg().lfg.exception)
 
     def test_annotator_empty_columns(self):
         a = DelayedDataFrame(
@@ -612,11 +601,8 @@ class Test_DelayedDataFramePPG:
             def calc(self, df):
                 return pd.DataFrame({"shu": [1, 2]})
 
-            def deps(self):
-                return []
-
         a += EmptyColumnNames()
-        ppg.JobGeneratingJob("shu", lambda: 55).depends_on(a.annotate())
+        force_load(a)
         anno_job_cb = a.anno_jobs[EmptyColumnNames().get_cache_name()]
         with pytest.raises(ppg.RuntimeError):
             ppg.run_pipegraph()
@@ -634,11 +620,12 @@ class Test_DelayedDataFramePPG:
             def calc(self, df):
                 return pd.DataFrame({})
 
-            def deps(self):
-                return []
-
-        with pytest.raises(AttributeError):
-            a += MissingColumnNames()
+        a += MissingColumnNames()
+        lg = a.anno_jobs["MissingColumnNames"]
+        force_load(a)
+        with pytest.raises(ppg.RuntimeError):
+            ppg.run_pipegraph()
+        assert "AttributeError" in repr(lg().lfg.exception)
 
     def test_DynamicColumNames(self):
         a = DelayedDataFrame(
@@ -653,12 +640,9 @@ class Test_DelayedDataFramePPG:
             def calc(self, df):
                 return pd.DataFrame({"a": ["x", "y"]})
 
-            def deps(self):
-                return []
-
         a += Dynamic()
         a.anno_jobs[Dynamic().get_cache_name()]
-        ppg.JobGeneratingJob("shu", lambda: 55).depends_on(a.annotate())
+        force_load(a)
         ppg.run_pipegraph()
         assert_frame_equal(
             a.df, pd.DataFrame({"A": [1, 2], "B": ["c", "d"], "a": ["x", "y"]})
@@ -980,7 +964,7 @@ class Test_DelayedDataFramePPG:
                 prefix = Path("fileA").read_text()
                 return pd.Series([prefix] * len(df))
 
-            def deps(self):
+            def deps(self, ddf):
                 return [ppg.FileGeneratingJob("fileA", wf)]
 
         a = DelayedDataFrame(
