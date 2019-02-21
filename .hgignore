@@ -56,3 +56,5 @@ tests/.testing_download_cache/
 prof/
 *.eggs
 .coverage
+pip-wheel-metadata/*
+.ppg_status*

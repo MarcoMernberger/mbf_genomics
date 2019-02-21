@@ -54,9 +54,6 @@ class DelayedDataFrame(object):
     def __repr__(self):
         return "DelayedDataFrame(%s)" % self.name
 
-    def __len__(self):
-        return len(self.df)
-
     def load(self):
         df = self.load_strategy.load()
         return df
@@ -78,6 +75,12 @@ class DelayedDataFrame(object):
         if self.load_strategy.build_deps:  # pragma: no branch
             return self.anno_jobs[anno.get_cache_name()]
 
+    def has_annotator(self, anno):
+        return anno.get_cache_name() in self.annotators
+
+    def get_annotator(self, cache_name):
+        return self.annotators[cache_name]
+
     @property
     def root(self):
         x = self
@@ -89,19 +92,13 @@ class DelayedDataFrame(object):
         """Job: create plotjobs and dummy annotation job.
 
         This is all fairly convoluted.
-        If you require a particular column, don't depend on this, depend on get_anno_job(Annotator),
-        or the result of add_annotator().
+        If you require a particular column, don't depend on this, but on the result of add_annotator().
         This is only the master job that jobs that require *all* columns (table dump...) depend on.
         """
         return self.load_strategy.annotate()
 
     def filter(
-        self,
-        new_name,
-        df_filter_function=None,
-        annotators=[],
-        dependencies=None,
-        result_dir=None,
+        self, new_name, df_filter_function, annotators=[], dependencies=None, **kwargs
     ):
         """Filter an ddf to a new one called new_name.
 
@@ -144,7 +141,7 @@ class DelayedDataFrame(object):
             for anno in annotators:
                 self += anno
 
-        result = self.__class__(new_name, load, dependencies, result_dir)
+        result = self._new_for_filtering(new_name, load, dependencies)
         result.parent = self
         result.filter_annos = annotators
         for anno in self.annotators.values():
@@ -152,6 +149,11 @@ class DelayedDataFrame(object):
 
         self.children.append(result)
         return result
+
+    def _new_for_filtering(self, new_name, load_func, deps, **kwargs):
+        if not "result_dir" in kwargs:
+            kwargs["result_dir"] = self.result_dir
+        return self.__class__(new_name, load_func, deps, **kwargs)
 
     def clone_without_annotators(
         self, new_name, non_annotator_columns_to_copy=None, result_dir=None
@@ -209,6 +211,25 @@ class DelayedDataFrame(object):
             deps = []
         return self.load_strategy.generate_file(output_filename, write, deps)
 
+    def plot(self, output_filename, plot_func, calc_func=None):
+        def do_plot(output_filename=output_filename):
+            df = self.df
+            if calc_func is not None:
+                df = calc_func(df)
+            p = plot_func(df)
+            if hasattr(p, "pd"):
+                p = p.pd
+            p.save(output_filename, verbose=False)
+
+        if self.load_strategy.build_deps:
+            deps = [
+                self.annotate(),
+                ppg.FunctionInvariant(output_filename + "_plot_func", plot_func),
+            ]
+        else:
+            deps = []
+        return self.load_strategy.generate_file(output_filename, do_plot, deps)
+
 
 class Load_Direct:
     def __init__(self, ddf, loading_function):
@@ -217,8 +238,9 @@ class Load_Direct:
         self.build_deps = False
 
     def load(self):
-        self.ddf.df = self.loading_function()
-        self.ddf.non_annotator_columns = self.ddf.df.columns
+        if not hasattr(self.ddf, 'df'):
+            self.ddf.df = self.loading_function()
+            self.ddf.non_annotator_columns = self.ddf.df.columns
 
     def generate_file(self, filename, write_callback, dependencies):
         write_callback(filename)
@@ -247,7 +269,10 @@ class Load_Direct:
         else:
             if not isinstance(anno.columns, list):
                 raise ValueError("Columns was not a list")
-            a_df = anno.calc(self.ddf.df)
+            if hasattr(anno, "calc_ddf"):
+                a_df = anno.calc(self.ddf)
+            else:
+                a_df = anno.calc(self.ddf.df)
         if isinstance(a_df, pd.Series) and len(s_should) == 1:
             a_df = pd.DataFrame({next(iter(s_should)): a_df})
         elif not isinstance(a_df, pd.DataFrame):
@@ -410,7 +435,10 @@ class Load_PPG:
             if not isinstance(anno.columns, list):
                 raise ValueError("Columns was not a list")
 
-            df = anno.calc(self.ddf.df)
+            if hasattr(anno, "calc_ddf"):
+                df = anno.calc_ddf(self.ddf)
+            else:
+                df = anno.calc(self.ddf.df)
             if isinstance(df, pd.Series) and len(anno.columns) == 1:
                 df = pd.DataFrame({anno.columns[0]: df})
             if not isinstance(df, pd.DataFrame):
@@ -457,7 +485,8 @@ class Load_PPG:
         job.depends_on(
             self.load(),
             ppg.FunctionInvariant(
-                self.ddf.cache_dir / (anno.get_cache_name() + "_func"), anno.calc
+                self.ddf.cache_dir / (anno.get_cache_name() + "_func"),
+                anno.calc if hasattr(anno, "calc") else anno.calc_ddf,
             ),
         )
         for d in anno.dep_annos():
@@ -466,4 +495,6 @@ class Load_PPG:
         return job
 
     def annotate(self):
-        return lambda: self.ddf.anno_jobs.values()
+        res = lambda: self.ddf.anno_jobs.values()
+        res.job_id = self.ddf.name + "_annotate_callback"
+        return res

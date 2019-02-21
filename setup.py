@@ -11,6 +11,8 @@ import sys
 
 from pkg_resources import require, VersionConflict
 from setuptools import setup
+from Cython.Build import cythonize
+import numpy
 
 
 try:
@@ -21,4 +23,8 @@ except VersionConflict:
 
 
 if __name__ == "__main__":
-    setup(use_pyscaffold=True)
+    setup(
+        use_pyscaffold=True,
+        ext_modules=cythonize("src/mbf_genomics/motifs/*.pyx"),
+        include_dirs=[numpy.get_include()],
+    )

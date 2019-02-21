@@ -11,11 +11,19 @@ import os
 import pytest
 import pypipegraph as ppg
 from pathlib import Path
-from pypipegraph.tests.fixtures import new_pipegraph  # noqa:F401
+from pypipegraph.tests.fixtures import new_pipegraph#, pytest_runtest_makereport  # noqa:F401
 
 # from mbf_externals.tests.fixtures import local_store, global_store  # noqa:F401
 root = Path(__file__).parent.parent
 sys.path.append(str(root / "src"))
+
+from plotnine.tests.conftest import (  # noqa:F401
+    _setup,
+    _teardown,  # noqa:F401
+    pytest_assertrepr_compare,
+)
+
+_setup()
 
 
 @pytest.fixture
@@ -62,8 +70,15 @@ def no_pipegraph(request):
 
 
 @pytest.fixture
-def clear_annotators(request):
+def clear_annotators(_request):
     """No pipegraph, but seperate directory per test"""
     import mbf_genomics.annotator
 
     mbf_genomics.annotator.annotator_singletons.clear()
+
+
+@pytest.fixture
+def clear_motif_cache(_request):
+    import mbf_genomics.motifs
+
+    mbf_genomics.motifs.motifs._PWMMotifCache = {}
