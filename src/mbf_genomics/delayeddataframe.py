@@ -4,6 +4,7 @@ import pypipegraph as ppg
 import os
 
 from .annotator import Annotator
+from mbf_externals.util import lazy_method
 
 
 class DelayedDataFrame(object):
@@ -212,6 +213,9 @@ class DelayedDataFrame(object):
         return self.load_strategy.generate_file(output_filename, write, deps)
 
     def plot(self, output_filename, plot_func, calc_func=None):
+        output_filename = Path(output_filename)
+        if not output_filename.is_absolute():
+            output_filename = self.result_dir / output_filename
         def do_plot(output_filename=output_filename):
             df = self.df
             if calc_func is not None:
@@ -224,7 +228,7 @@ class DelayedDataFrame(object):
         if self.load_strategy.build_deps:
             deps = [
                 self.annotate(),
-                ppg.FunctionInvariant(output_filename + "_plot_func", plot_func),
+                ppg.FunctionInvariant(output_filename.with_name(output_filename.name +  "_plot_func"), plot_func),
             ]
         else:
             deps = []
@@ -238,11 +242,11 @@ class Load_Direct:
         self.build_deps = False
 
     def load(self):
-        if not hasattr(self.ddf, 'df'):
+        if not hasattr(self.ddf, "df"):
             self.ddf.df = self.loading_function()
             self.ddf.non_annotator_columns = self.ddf.df.columns
 
-    def generate_file(self, filename, write_callback, dependencies):
+    def generate_file(self, filename, write_callback, dependencies, empty_ok=False):
         write_callback(filename)
         return Path(filename)
 
@@ -270,7 +274,7 @@ class Load_Direct:
             if not isinstance(anno.columns, list):
                 raise ValueError("Columns was not a list")
             if hasattr(anno, "calc_ddf"):
-                a_df = anno.calc(self.ddf)
+                a_df = anno.calc_ddf(self.ddf)
             else:
                 a_df = anno.calc(self.ddf.df)
         if isinstance(a_df, pd.Series) and len(s_should) == 1:
@@ -346,6 +350,7 @@ class Load_PPG:
         for c in self.ddf.children:
             c += anno
 
+    @lazy_method
     def load(self):
         def load_func(df):
             self.ddf.df = df
@@ -362,9 +367,9 @@ class Load_PPG:
         )
         return job
 
-    def generate_file(self, filename, write_callback, dependencies):
+    def generate_file(self, filename, write_callback, dependencies, empty_ok=False):
         return (
-            ppg.FileGeneratingJob(filename, write_callback)
+            ppg.FileGeneratingJob(filename, write_callback, empty_ok=empty_ok)
             .depends_on(dependencies)
             .depends_on(self.load())
         )

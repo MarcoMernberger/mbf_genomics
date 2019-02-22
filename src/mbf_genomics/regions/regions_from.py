@@ -3,8 +3,8 @@ import pandas as pd
 import numpy as np
 
 from .regions import GenomicRegions, merge_intervals
-from ..sources import Source
 from mbf_externals.util import to_string
+
 
 def read_pandas(filename):
     import pandas as pd
@@ -24,40 +24,6 @@ def read_pandas(filename):
         return pd.read_csv(filename)
     else:
         raise ValueError("Unknown filetype: %s" % filename)
-
-
-class GenomicRegionsSource(Source):
-    """An iterator for GenomicRegions
-    Use for example with the L{OverlapScorer} in genomics.overlap
-
-    """
-
-    def __init__(self, name, list_of_gis):
-        """All sources must have a name"""
-        self.name = name
-        self.list = list_of_gis
-
-    def __iter__(self):
-        """Iterate over the available GenomicRegions.
-            This is called after all jobs in get_dependencies() have been satisfied"""
-        return iter(self.list)
-
-    def get_dependencies(self):
-        """Jobs returned here must be completed
-            before GenomicRegionSource.__iter__ is accessed"""
-        return [
-            ppg.ParameterInvariant(
-                "GenomicRegionSource" + self.name, [x.name for x in self.list]
-            )
-            # jobs...
-        ]
-
-    def write_all(self):
-        def generate_jobs():
-            return [gr.write() for gr in self]
-            return ppg.JobGeneratingJob(
-                self.name + "_write_all", generate_jobs
-            ).depends_on(self.load())
 
 
 def GenomicRegions_FromGFF(
@@ -81,7 +47,6 @@ def GenomicRegions_FromGFF(
     or provide an alternative constructor to call with @alternative_class
     """
 
-    
     def load():
         from mbf_fileformats.gff import gffToDict
 
@@ -120,10 +85,8 @@ def GenomicRegions_FromGFF(
 
     if alternative_class is None:
         alternative_class = GenomicRegions
-    return alternative_class(
-        name,
-        load,
-        [
+    if ppg.inside_ppg():
+        deps = [
             ppg.FileTimeInvariant(filename),
             ppg.ParameterInvariant(
                 name + "_params_GenomicRegions_FromGFF",
@@ -135,7 +98,13 @@ def GenomicRegions_FromGFF(
             ppg.FunctionInvariant(
                 name + "_chromosome_manlger_GenomicRegions_FromGFF", chromosome_mangler
             ),
-        ],
+        ]
+    else:
+        deps = []
+    return alternative_class(
+        name,
+        load,
+        deps,
         genome,
         on_overlap,
         summit_annotator=summit_annotator,
@@ -174,10 +143,15 @@ def GenomicRegions_FromWig(
             df["stop"] += enlarge_3prime
         return df
 
+    if ppg.inside_ppg():
+        deps = [ppg.FileTimeInvariant(filename)]
+    else:
+        deps = []
+
     return GenomicRegions(
         name,
         load,
-        [ppg.FileTimeInvariant(filename)],
+        deps,
         genome,
         on_overlap,
         summit_annotator=summit_annotator,
@@ -209,8 +183,7 @@ def GenomicRegions_FromBed(
         data = {}
         entries = read_bed(filename)
         data["chr"] = np.array(
-            [chromosome_mangler(to_string(e.refseq)) for e in entries],
-            dtype=np.object,
+            [chromosome_mangler(to_string(e.refseq)) for e in entries], dtype=np.object
         )
         data["start"] = np.array([e.position for e in entries], dtype=np.int32)
         data["stop"] = np.array(
@@ -218,9 +191,7 @@ def GenomicRegions_FromBed(
         )
         data["score"] = np.array([e.score for e in entries], dtype=np.float)
         data["strand"] = np.array([e.strand for e in entries], dtype=np.int8)
-        data["name"] = np.array(
-            [to_string(e.name) for e in entries], dtype=np.object
-        )
+        data["name"] = np.array([to_string(e.name) for e in entries], dtype=np.object)
         data = pd.DataFrame(data)
         if filter_invalid_chromosomes:
             keep = [x in valid_chromosomes for x in data["chr"]]
@@ -233,14 +204,18 @@ def GenomicRegions_FromBed(
         if len(res["name"].unique()) == 1:
             res = res.drop(["name"], axis=1)
         return res
+    if ppg.inside_ppg():
+        deps = [
+            ppg.FileTimeInvariant(filename),
+            ppg.FunctionInvariant(name + "_chrmangler", chromosome_mangler),
+        ]
+    else:
+        deps = []
 
     return GenomicRegions(
         name,
         load,
-        [
-            ppg.FileTimeInvariant(filename),
-            ppg.FunctionInvariant(name + "_chrmangler", chromosome_mangler),
-        ],
+        deps,
         genome,
         on_overlap=on_overlap,
         summit_annotator=summit_annotator,
@@ -296,15 +271,18 @@ def GenomicRegions_FromBigBed(
             )
         return res
 
-    print(filename)
-    raise ValueError()
+    if ppg.inside_ppg():
+        deps = [
+            ppg.FileTimeInvariant(filename),
+            ppg.FunctionInvariant(name + "_chrmangler", chromosome_mangler),
+        ]
+    else:
+        deps = []
+
     return GenomicRegions(
         name,
         load,
-        [
-            ppg.FileTimeInvariant(filename),
-            ppg.FunctionInvariant(name + "_chrmangler", chromosome_mangler),
-        ],
+        deps,
         genome,
         on_overlap=on_overlap,
         summit_annotator=summit_annotator,
@@ -407,13 +385,17 @@ def GenomicRegions_Union(
 
     if len(set([x.genome for x in list_of_grs])) > 1:
         raise ValueError("Can only merge GenomicRegions that have the same genome")
-    deps = [x.load() for x in list_of_grs]
-    deps.append(
-        ppg.ParameterInvariant(
-            name + "_input_grs",
-            list(sorted([x.name for x in list_of_grs])) + [expand_by_x_bp],
+    
+    if ppg.inside_ppg():
+        deps = [x.load() for x in list_of_grs]
+        deps.append(
+            ppg.ParameterInvariant(
+                name + "_input_grs",
+                list(sorted([x.name for x in list_of_grs])) + [expand_by_x_bp],
+            )
         )
-    )
+    else:
+        deps = []
     vid = ("union", [x.vid for x in list_of_grs])
     return GenomicRegions(
         name,
@@ -427,39 +409,8 @@ def GenomicRegions_Union(
     )
 
 
-def GenomicRegions_UnionFromSource(
-    source, on_overlap="merge", summit_annotator=None
-):
-    """Combine a whole source of GRs into their union, similar to GR.union(), which handles only two"""
-
-    def load():
-        df = pd.concat([x.df[["chr", "start", "stop"]] for x in source])
-        return df
-
-    gr_capture = []
-
-    def inject_loads():
-        gr_capture[0].vid = [x.vid for x in source]
-        return [x.load() for x in source] + [x.annotate() for x in source]
-
-    dep_injection = ppg.DependencyInjectionJob(
-        source.name + "_union_dep", inject_loads
-    ).depends_on(source.load())
-    res = GenomicRegions(
-        source.name + "_union",
-        load,
-        [dep_injection],
-        source.genome,
-        on_overlap=on_overlap,
-        
-        summit_annotator=summit_annotator,
-    )
-    gr_capture.append(res)
-    return res
-
-
 def GenomicRegions_Common(
-    name, list_of_grs,  summit_annotator=None, sheet_name="Overlaps"
+    name, list_of_grs, summit_annotator=None, sheet_name="Overlaps"
 ):
     """Combine serveral GRs into one. Keep only those (union) regions occuring in all."""
 
@@ -480,12 +431,17 @@ def GenomicRegions_Common(
 
     if len(set([x.genome for x in list_of_grs])) > 1:
         raise ValueError("Can only merge GenomicRegions that have the same genome")
-    deps = [x.build_intervals() for x in list_of_grs]
-    deps.append(
-        ppg.ParameterInvariant(
-            name + "_input_grs", sorted([x.name for x in list_of_grs])
+    if ppg.inside_ppg():
+        deps = [x.build_intervals() for x in list_of_grs]
+        deps.append(
+            ppg.ParameterInvariant(
+                name + "_input_grs", sorted([x.name for x in list_of_grs])
+            )
         )
-    )
+    else:
+        for x in list_of_grs:
+            x.build_intervals()
+        deps = []
     vid = ("common", [x.vid for x in list_of_grs])
     return GenomicRegions(
         name,
@@ -493,7 +449,6 @@ def GenomicRegions_Common(
         deps,
         list_of_grs[0].genome,
         on_overlap="raise",
-        
         summit_annotator=summit_annotator,
         sheet_name=sheet_name,
         vid=vid,
@@ -530,10 +485,15 @@ def GenomicRegions_FromPartec(
         df["stop"] = df["stop"].astype(int)
         return df
 
+    if ppg.inside_ppg():
+        deps = [ppg.FileTimeInvariant(filename)]
+    else:
+        deps = []
+
     return GenomicRegions(
         name,
         load,
-        [ppg.FileTimeInvariant(filename)],
+        deps,
         genome,
         on_overlap,
         summit_annotator=summit_annotator,
@@ -546,7 +506,6 @@ def GenomicRegions_FromTable(
     filename,
     genome,
     on_overlap="raise",
-    
     filter_func=None,
     vid=None,
     sheet_name="FromTable",
@@ -567,16 +526,19 @@ def GenomicRegions_FromTable(
             df = filter_func(df)
         return df
 
+    if ppg.inside_ppg():
+        deps = [
+            ppg.FileTimeInvariant(filename),
+            ppg.FunctionInvariant(name + "_filter_func", filter_func),
+        ]
+    else:
+        deps = []
     return GenomicRegions(
         name,
         load,
-        [
-            ppg.FileTimeInvariant(filename),
-            ppg.FunctionInvariant(name + "_filter_func", filter_func),
-        ],
+        deps,
         genome,
         on_overlap,
-        
         sheet_name=sheet_name,
         vid=vid,
     )
@@ -592,14 +554,17 @@ def GenomicRegions_FromGenome(genome):
             data["start"].append(0)
             data["stop"].append(len(value))
         return pd.DataFrame(data)
-
+    if ppg.inside_ppg():
+        deps = [genome.get_dependencies()]
+    else:
+        deps = []
     return GenomicRegions(
-        "spike_genomic_region", __loading_function, [genome.get_dependencies()], genome
+        "spike_genomic_region", __loading_function, deps, genome
     )
 
 
 def GenomicRegions_CommonInAtLeastX(
-    name, list_of_grs, X,  summit_annotator=None, sheet_name="Overlaps"
+    name, list_of_grs, X, summit_annotator=None, sheet_name="Overlaps"
 ):
     """Combine serveral GRs into one. Keep only those (union) regions occuring in at least x."""
 
@@ -620,12 +585,15 @@ def GenomicRegions_CommonInAtLeastX(
 
     if len(set([x.genome for x in list_of_grs])) > 1:
         raise ValueError("Can only merge GenomicRegions that have the same genome")
-    deps = [x.build_intervals() for x in list_of_grs]
-    deps.append(
-        ppg.ParameterInvariant(
-            name + "_input_grs", sorted([x.name for x in list_of_grs])
+    if ppg.inside_ppg():
+        deps = [x.build_intervals() for x in list_of_grs]
+        deps.append(
+            ppg.ParameterInvariant(
+                name + "_input_grs", sorted([x.name for x in list_of_grs])
+            )
         )
-    )
+    else:
+        deps = []
     vid = ("common at least %i" % X, [x.vid for x in list_of_grs])
     return GenomicRegions(
         name,
@@ -633,7 +601,6 @@ def GenomicRegions_CommonInAtLeastX(
         deps,
         list_of_grs[0].genome,
         on_overlap="raise",
-        
         summit_annotator=summit_annotator,
         sheet_name=sheet_name,
         vid=vid,
@@ -661,14 +628,15 @@ def GenomicRegions_FromMotifHits(name, motif, threshold, genome):
         return pd.DataFrame(
             {"chr": chrs, "start": starts, "stop": stops, "scores": scores}
         )
-
-    deps = [
+    if ppg.inside_ppg():
+        deps = [
         motif.load(),
         ppg.ParameterInvariant("GR_%s" % name, (threshold,)),
         genome.get_dependencies(),
     ]
+    else: deps = []
     return GenomicRegions(
-        name, load, deps, genome, on_overlap="ignore",  sheet_name="Motif"
+        name, load, deps, genome, on_overlap="ignore", sheet_name="Motif"
     )
 
 
@@ -702,5 +670,5 @@ def GenomicRegions_Windows(
         return pd.DataFrame({"chr": chrs, "start": starts, "stop": stops})
 
     return GenomicRegions(
-        name, load, [], genome, on_overlap="raise",  sheet_name=sheet_name
+        name, load, [], genome, on_overlap="raise", sheet_name=sheet_name
     )

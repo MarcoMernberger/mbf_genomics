@@ -13,16 +13,15 @@ from pathlib import Path
 from mbf_genomics.delayeddataframe import DelayedDataFrame
 from mbf_genomics.annotator import Annotator
 from mbf_genomes.common import reverse_complement
+from mbf_genomes import GenomeBase
 from mbf_externals.util import lazy_property
 from mbf_fileformats.util import pathify
 from .annotators import SummitMiddle
 
-# from genomics.sources import Source
-# from genomics.sequences import Sequences
-
 
 def get_overlapping_interval_indices(start, stop, start_array, stop_array):
     """Return the indices of all intervals stored in start_array, stop_array that overlap start, stop"""
+    # TODO: replace with better algorithm - e.g. rustbio intervl trees
     first_start_smaller = np.searchsorted(start_array, start) - 1
     first_end_larger = np.searchsorted(stop_array, stop, "right") + 1
     result = []
@@ -305,8 +304,8 @@ class GenomicRegions(DelayedDataFrame):
         df = self.gr_loading_function()
         if not isinstance(df, pd.DataFrame):
             raise ValueError(
-                "GenomicRegion.loading_function must return a pandas.DataFrame, was: %s"
-                % type(df)
+                "GenomicRegion(%s).loading_function must return a pandas.DataFrame, was: %s\n%s"
+                % (self.name, type(df), self.gr_loading_function)
             )
         for col in self.get_default_columns():
             if not col in df.columns:
@@ -750,11 +749,14 @@ class GenomicRegions(DelayedDataFrame):
     # interval querying
     def build_intervals(self):
         """Prepare the internal datastructure for all overlap/closest/set based operations"""
-        return (
-            ppg.DataLoadingJob(self.name + "_build", self.do_build_intervals)
-            .depends_on(self.load())
-            .depends_on(self.genome.download_genome())
-        )
+        if self.load_strategy.build_deps:
+            return (
+                ppg.DataLoadingJob(self.name + "_build", self.do_build_intervals)
+                .depends_on(self.load())
+                .depends_on(self.genome.download_genome())
+            )
+        else:
+            self.do_build_intervals()
 
     # output functions
 
@@ -773,7 +775,7 @@ class GenomicRegions(DelayedDataFrame):
             output_filename, Path(self.result_dir) / (self.name + ".bed")
         )
 
-        def write(self=self, output_filename=output_filename):
+        def write(output_filename=output_filename):
             bed_entries = []
             for ii, row in self.df.iterrows():
                 if region_name is None:
@@ -816,11 +818,14 @@ class GenomicRegions(DelayedDataFrame):
                 include_header=include_header,
             )
 
-        return (
-            ppg.FileGeneratingJob(output_filename, write)
-            .depends_on(self.load())
-            .depends_on(ppg.ParameterInvariant(output_filename, (include_header,)))
-        )
+        if self.load_strategy.build_deps:
+            deps = [
+                self.load(),
+                ppg.ParameterInvariant(output_filename, (include_header,)),
+            ]
+        else:
+            deps = []
+        return self.load_strategy.generate_file(output_filename, write, deps)
 
     def write_bigbed(self, output_filename=None):
         """Store the intervals of the GenomicRegion in a big bed file"""
@@ -830,8 +835,7 @@ class GenomicRegions(DelayedDataFrame):
             output_filename, Path(self.result_dir) / (self.name + ".bigbed")
         )
 
-        def write(self=self, output_filename=output_filename):
-            import chipseq
+        def write(output_filename=output_filename):
 
             bed_entries = []
             for idx, row in self.df.iterrows():
@@ -866,11 +870,15 @@ class GenomicRegions(DelayedDataFrame):
             else:
                 with open(output_filename, "wb"):
                     pass
-
-        return ppg.FileGeneratingJob(
-            output_filename, write, empty_file_allowed=True
-        ).depends_on(self.load())
-
+        if self.load_strategy.build_deps:
+            deps = [
+                self.load(),
+            ]
+        else:
+            deps = []
+        return self.load_strategy.generate_file(output_filename, write,
+                                                deps, empty_ok=True)
+        
     # filtering
     def _new_for_filtering(self, new_name, load_func, deps, **kwargs):
         """When filtering, a new object of this class is created.
@@ -905,15 +913,20 @@ class GenomicRegions(DelayedDataFrame):
 
         if not summit_annotator:
             summit_annotator = self.summit_annotator
-        return self.filter(
-            new_name,
-            df_filter_function=filter_func,
-            dependencies=[
+        if self.load_strategy.build_deps:
+            deps = [
                 other_gr.build_intervals(),
                 ppg.ParameterInvariant(
                     "GenomicRegions_%s_parents" % new_name, (self.name, other_gr.name)
                 ),  # so if you swap out the gr, it's detected...
-            ],
+            ]
+        else:
+            other_gr.build_intervals()
+            deps = []
+        return self.filter(
+            new_name,
+            df_filter_function=filter_func,
+            dependencies=deps,
             summit_annotator=summit_annotator,
             sheet_name=sheet_name,
         )
@@ -1012,15 +1025,21 @@ class GenomicRegions(DelayedDataFrame):
                 )
             return keep
 
-        return self.filter(
-            new_name,
-            df_filter_function=filter_func,
-            dependencies=[
+        if self.load_strategy.build_deps:
+            deps = [
                 other_gr.build_intervals(),
                 ppg.ParameterInvariant(
                     "GenomicRegions_%s_parents" % new_name, (self.name, other_gr.name)
                 ),  # so if you swap out the gr, it's detected...
-            ],
+            ]
+        else:
+            other_gr.build_intervals()
+            deps = []
+
+        return self.filter(
+            new_name,
+            df_filter_function=filter_func,
+            dependencies=deps,
             summit_annotator=summit_annotator,
             sheet_name=sheet_name,
         )
@@ -1193,17 +1212,23 @@ class GenomicRegions(DelayedDataFrame):
             else:
                 return pd.DataFrame({"chr": [], "start": [], "stop": []})
 
-        result = GenomicRegions(
-            new_name,
-            do_load,
-            [
+        if self.load_strategy.build_deps:
+            deps = [
                 other_gr.load(),
                 self.load(),
                 other_gr.build_intervals(),
                 ppg.ParameterInvariant(
                     "GenomicRegions_%s_parents" % new_name, (self.name, other_gr.name)
                 ),  # so if you swap out the gr, it's detected...
-            ],
+            ]
+        else:
+            deps = []
+            other_gr.build_intervals()
+
+        result = GenomicRegions(
+            new_name,
+            do_load,
+            deps,
             self.genome,
             on_overlap="merge",
             summit_annotator=summit_annotator,
@@ -1272,17 +1297,23 @@ class GenomicRegions(DelayedDataFrame):
             else:
                 return pd.DataFrame({"chr": [], "start": [], "stop": []})
 
-        result = GenomicRegions(
-            new_name,
-            do_load,
-            [
+        if self.load_strategy.build_deps:
+            deps = [
                 other_gr.load(),
                 self.load(),
                 other_gr.build_intervals(),
                 ppg.ParameterInvariant(
                     "GenomicRegions_%s_parents" % new_name, (self.name, other_gr.name)
                 ),  # so if you swap out the gr, it's detected...
-            ],
+            ]
+        else:
+            other_gr.build_intervals()
+            deps = []
+
+        result = GenomicRegions(
+            new_name,
+            do_load,
+            deps,
             self.genome,
             on_overlap="merge",
             summit_annotator=summit_annotator,
@@ -1328,17 +1359,23 @@ class GenomicRegions(DelayedDataFrame):
             else:
                 return pd.DataFrame({"chr": [], "start": [], "stop": []})
 
-        result = GenomicRegions(
-            new_name,
-            do_load,
-            [
+        if self.load_strategy.build_deps:
+            deps = [
                 other_gr.load(),
                 self.load(),
                 other_gr.build_intervals(),
                 ppg.ParameterInvariant(
                     "GenomicRegions_%s_parents" % new_name, (self.name, other_gr.name)
                 ),  # so if you swap out the gr, it's detected...
-            ],
+            ]
+        else:
+            deps = []
+            other_gr.build_intervals()
+
+        result = GenomicRegions(
+            new_name,
+            do_load,
+            deps,
             self.genome,
             on_overlap="merge",
             summit_annotator=summit_annotator,
@@ -1385,15 +1422,20 @@ class GenomicRegions(DelayedDataFrame):
                     new_rows.append({"chr": chr, "start": 0, "stop": chr_lens[chr]})
             return pd.DataFrame(new_rows)
 
-        result = GenomicRegions(
-            new_name,
-            do_load,
-            [
+        if self.load_strategy.build_deps:
+            deps = [
                 self.load(),
                 ppg.ParameterInvariant(
                     "GenomicRegions_%s_parents" % new_name, (self.name)
                 ),  # so if you swap out the gr, it's detected...
-            ],
+            ]
+        else:
+            deps = []
+
+        result = GenomicRegions(
+            new_name,
+            do_load,
+            deps,
             self.genome,
             on_overlap="merge",
             summit_annotator=summit_annotator,
@@ -1508,34 +1550,12 @@ class GenomicRegions(DelayedDataFrame):
                 "GenomicRegions set-operations only work if both have the same genome. You had %s and %s"
                 % (self.genome, other_gr.genome)
             )
+        if not self.load_strategy.build_deps:
+            other_gr.build_intervals()
         overlap = 0
         for chr, start, stop in self._iter_intersections(other_gr):
             overlap += 1
         return overlap
-
-    def randomize(self, randomizer, new_name=None, on_overlap="merge", seed=500):
-        """Generate a randomized/shuffled GenomicRegions
-        from this one using the randomization model provided in randomizer
-        (see L{random} for available classes.
-        Annotators are inherited, non canonical row conservation depends on the randomizer
-        """
-        if new_name is None:
-            new_name = self.name + randomizer.name + str(self.random_count)
-
-        def do_load(seed=seed, random_count=self.random_count):
-            random.seed(seed + random_count)
-            np.random.seed(seed + random_count)
-            return randomizer.calculate(self)
-
-        dependencies = []
-        for anno in randomizer.get_annotators(self):
-            dependencies.append(self.add_annotator(anno))
-        dependencies.append(self.load())
-        self.random_count += 1
-        res = GenomicRegions(
-            new_name, do_load, dependencies, self.genome, on_overlap=on_overlap
-        )
-        return res
 
     def convert(
         self,
@@ -1587,26 +1607,29 @@ class GenomicRegions(DelayedDataFrame):
         if new_genome is None:
             new_genome = self.genome
         else:
-            if not hasattr(new_genome, "species"):
+            if not isinstance(new_genome, GenomeBase):
                 raise ValueError(
-                    "new_genome %s did not have species attribute? Is it a genome? did you want to pass int dependencies?"
+                    "new_genome %s was not a genome. Did you mean to pass in dependencies, that's the next parameter?"
                     % new_genome
                 )
-        deps = [self.load()]
-        if dependencies:
-            deps.extend(dependencies)
-        for anno in annotators_required:
-            deps.append(self.add_annotator(anno))
-        deps.append(
-            ppg.ParameterInvariant(
-                new_name + "_conversion_paramaters", convert_parameters
+        if self.load_strategy.build_deps:
+            deps = [self.load()]
+            if dependencies:
+                deps.extend(dependencies)
+            for anno in annotators_required:
+                deps.append(self.add_annotator(anno))
+            deps.append(
+                ppg.ParameterInvariant(
+                    new_name + "_conversion_paramaters", convert_parameters
+                )
             )
-        )
-        deps.append(
-            ppg.FunctionInvariant(
-                new_name + "_conversion_function", conversion_function
+            deps.append(
+                ppg.FunctionInvariant(
+                    new_name + "_conversion_function", conversion_function
+                )
             )
-        )
+        else:
+            deps = []
         if hasattr(conversion_function, "dependencies"):
             deps.extend(conversion_function.dependencies)
         if summit_annotator is None:
@@ -1621,66 +1644,3 @@ class GenomicRegions(DelayedDataFrame):
             sheet_name=sheet_name,
             vid=self.vid,
         )
-
-    # @exptools.common.lazy_member('_sequences')
-    def to_sequences(
-        self,
-        sort_by=None,
-        sorting_required_annotators=None,
-        turn_by_next_transcript=False,
-    ):
-        """Turn this into a Sequences object. Optionally sorted, bass in sort_by and sorting_required_annotators.
-        If you want to turn it by the next transcript, pass in an appropriate annotator (e.g NextTranscript)"""
-        if not turn_by_next_transcript is False and not isinstance(
-            turn_by_next_transcript, Annotator
-        ):
-            raise ValueError("turn_by_next_transcript must be False or an annotator")
-
-        def load_seqs():
-            data = {"name": [], "seq": [], "chr": [], "start": [], "stop": []}
-            has_strand = "strand" in self.df.columns
-            if has_strand or turn_by_next_transcript:
-                data["strand"] = []
-            ii = 0
-            if sort_by:
-                df = self.df.sort_values(**sort_by)
-            else:
-                df = self.df
-            for dummy_idx, row in df.iterrows():
-                if "name" in row:
-                    data["name"].append(row["name"])
-                else:
-                    data["name"].append("%i_%s" % (ii, self.name))
-                ii += 1
-                seq = self.genome.get_sequence(row["chr"], row["start"], row["stop"])
-                if turn_by_next_transcript:
-                    if row[turn_by_next_transcript.column_distance] > 0:
-                        data["strand"].append(1)
-                    else:
-                        seq = reverse_complement(seq).upper()
-                        data["strand"].append(-1)
-                else:
-                    if has_strand:
-                        if row["strand"] == -1:
-                            seq = reverse_complement(seq).upper()
-                        data["strand"].append(row["strand"])
-                data["seq"].append(seq)
-                data["chr"].append(row["chr"])
-                data["start"].append(row["start"])
-                data["stop"].append(row["stop"])
-            return pd.DataFrame(data)
-
-        deps = [
-            self.load(),
-            ppg.ParameterInvariant("sequences_%s_sort" % self.name, (sort_by,)),
-        ]
-        if sorting_required_annotators:
-            for anno in sorting_required_annotators:
-                deps.append(self.add_annotator(anno))
-        if turn_by_next_transcript:
-            deps.append(self.add_annotator(turn_by_next_transcript))
-        s = Sequences(
-            self.name, load_seqs, deps, self.genome, sheet_name=self.sheet_name
-        )  # no need for parameter dependency - if the gr changes, the name does as well, and sort_by get's bound anyhow
-        s.summit_annotator = self.summit_annotator
-        return s

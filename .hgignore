@@ -58,3 +58,4 @@ prof/
 .coverage
 pip-wheel-metadata/*
 .ppg_status*
+*.pypipegraph_status*

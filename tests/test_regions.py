@@ -1,6 +1,6 @@
 import logging
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.WARNING)
 import pytest
 import numpy
 import os
@@ -11,125 +11,85 @@ import dppd
 import dppd_plotnine
 import inspect
 import sys
-from matplotlib.testing.compare import compare_images
 
 
 import mbf_genomics.regions as regions
 from mbf_genomics.annotator import Constant, Annotator
-from mbf_genomes.example_genomes import get_Candidatus_carsonella_ruddii_pv
 from mbf_genomes.filebased import InteractiveFileBasedGenome
 
-dp, X = dppd.dppd()
+from .shared import (
+    get_genome,
+    get_genome_chr_length,
+    force_load,
+    assert_image_equal,
+    inside_ppg,
+)
 
+dp, X = dppd.dppd()
 data_path = Path(__file__).parent / "sample_data"
 
 
-def caller_name(skip=2):
-    """Get a name of a caller in the format module.class.method
-
-       `skip` specifies how many levels of stack to skip while getting caller
-       name. skip=1 means "who calls me", skip=2 "who calls my caller" etc.
-
-       An empty string is returned if skipped levels exceed stack height
-    """
-
-    def stack_(frame):
-        framelist = []
-        while frame:
-            framelist.append(frame)
-            frame = frame.f_back
-        return framelist
-
-    stack = stack_(sys._getframe(1))
-    start = 0 + skip
-    if len(stack) < start + 1:
-        return ""
-    parentframe = stack[start]
-
-    name = []
-    module = inspect.getmodule(parentframe)
-    # `modname` can be None when frame is executed directly in console
-    # TODO(techtonik): consider using __main__
-    if module:
-        name.append(module.__name__)
-    # detect classname
-    if "self" in parentframe.f_locals:
-        # I don't know any way to detect call from the object method
-        # XXX: there seems to be no way to detect static method call - it will
-        #      be just a function call
-        name.append(parentframe.f_locals["self"].__class__.__name__)
-    codename = parentframe.f_code.co_name
-    if codename != "<module>":  # top level usually
-        name.append(codename)  # function or a method
-    del parentframe
-    return ".".join(name)
-
-
-def assert_image_equal(generated_image_path, tolerance=2):
-    generated_image_path = Path(generated_image_path).absolute()
-    extension = generated_image_path.suffix
-    caller = caller_name(1)
-    if caller.count(".") == 2:
-        module, cls, func = caller.split(".")
+def run_pipegraph():
+    if inside_ppg():
+        ppg.run_pipegraph()
     else:
-        module, func = caller.split(".")
-        cls = "_"
-    should_path = (
-        Path(__file__).parent / "base_images" / module / cls / (func + extension)
-    )
-    if not should_path.exists():
-        should_path.parent.mkdir(exist_ok=True, parents=True)
-        raise ValueError(
-            f"Base_line image not found, perhaps: \ncp {generated_image_path} {should_path}"
-        )
-    err = compare_images(
-        str(should_path), str(generated_image_path), tolerance, in_decorator=True
-    )
-    assert not err
+        pass
 
 
-def get_genome(name=None):
-    if ppg.util.global_pipegraph is None:
-        return get_Candidatus_carsonella_ruddii_pv(
-            name,
-            cache_dir=Path(__file__).parent / "run" / "genome_cache",
-            ignore_code_changes=True,
-        )
-    else:
-        if not hasattr(ppg.util.global_pipegraph, "_genome"):
-            ppg.util.global_pipegraph._genome = {}
-        if not name in ppg.util.global_pipegraph._genome:
-            ppg.util.global_pipegraph._genome[
-                name
-            ] = get_Candidatus_carsonella_ruddii_pv(
-                name,
-                cache_dir=Path(__file__).parent / "run" / "genome_cache",
-                ignore_code_changes=True,
-            )
-        return ppg.util.global_pipegraph._genome[name]
+class RaiseDirectOrInsidePipegraph(object):
+    def __init__(self, expected_exception, search_message=None):
+        self.expected_exception = expected_exception
+        self.message = "DID NOT RAISE {}".format(expected_exception)
+        self.search_message = search_message
+        self.excinfo = None
 
+    def __enter__(self):
+        import _pytest
 
-def get_genome_chr_length(chr_lengths=None, name=None):
-    if chr_lengths is None:
-        chr_lengths = {
-            "1": 100_000,
-            "2": 200_000,
-            "3": 300_000,
-            "4": 400_000,
-            "5": 500_000,
-        }
-    genome = get_genome(name + "_chr" if name else "dummy_genome_chr")
-    genome.get_chromosome_lengths = lambda: chr_lengths
-    return genome
+        self.excinfo = object.__new__(_pytest._code.ExceptionInfo)
+        return self.excinfo
 
+    def __exit__(self, *tp):
+        from _pytest.outcomes import fail
 
-def force_load(job):
-    return ppg.JobGeneratingJob(job.job_id + "_force_load", lambda: None).depends_on(
-        job
-    )
+        if inside_ppg():
+            with pytest.raises(ppg.RuntimeError) as e:
+                run_pipegraph()
+            assert isinstance(e.value.exceptions[0], self.expected_exception)
+            if self.search_message:
+                assert self.search_message in str(e.value.exceptions[0])
+        else:
+            __tracebackhide__ = True
+            if tp[0] is None:
+                fail(self.message)
+            self.excinfo.__init__(tp)
+            suppress_exception = issubclass(self.excinfo.type, self.expected_exception)
+            if sys.version_info[0] == 2 and suppress_exception:
+                sys.exc_clear()
+            return suppress_exception
 
 
 @pytest.mark.usefixtures("new_pipegraph")
+class TestGenomicRegionsLoadingPPGOnly:
+    def test_dependency_passing(self):
+        job = ppg.ParameterInvariant("sha", (None,))
+        a = regions.GenomicRegions("shu", lambda: None, [job], get_genome())
+        load_job = a.load()
+        assert job in load_job.lfg.prerequisites
+
+    def test_dependency_may_be_iterable_instead_of_list(self):
+        job = ppg.ParameterInvariant("shu", (None,))
+        a = regions.GenomicRegions("shu", lambda: None, (job,), get_genome())
+        load_job = a.load()
+        assert job in load_job.lfg.prerequisites
+
+    def test_depenencies_must_be_jobs(self):
+        job = ppg.ParameterInvariant("shu", (None,))
+        with pytest.raises(ValueError):
+            a = regions.GenomicRegions("shu", lambda: None, ["shu"], get_genome())
+
+
+@pytest.mark.usefixtures("both_ppg_and_no_ppg")
 class TestGenomicRegionsLoadingTests:
     def tearDown(self):
         import shutil
@@ -139,15 +99,21 @@ class TestGenomicRegionsLoadingTests:
         except OSError:
             pass
 
-    def test_raises_on_duplicate_name(self, new_pipegraph):
-        a = regions.GenomicRegions("shu", lambda: None, [], get_genome())
+    def test_raises_on_duplicate_name(self, both_ppg_and_no_ppg):
+        def sample_data():
+            return pd.DataFrame(
+                {"chr": ["Chromosome"], "start": [1000], "stop": [1100]}
+            )
 
-        with pytest.raises(ValueError):
-            b = regions.GenomicRegions("shu", lambda: None, [], get_genome())
-        new_pipegraph.new_pipegraph()
-        c = regions.GenomicRegions(
-            "shu", lambda: None, [], get_genome()
-        )  # should not raise
+        a = regions.GenomicRegions("shu", sample_data, [], get_genome())
+
+        if inside_ppg():
+            with pytest.raises(ValueError):
+                b = regions.GenomicRegions("shu", sample_data, [], get_genome())
+            both_ppg_and_no_ppg.new_pipegraph()
+            c = regions.GenomicRegions(
+                "shu", sample_data, [], get_genome()
+            )  # should not raise
 
     def test_loading(self):
         def sample_data():
@@ -156,9 +122,12 @@ class TestGenomicRegionsLoadingTests:
             )
 
         a = regions.GenomicRegions("sha", sample_data, [], get_genome())
-        assert not hasattr(a, "df")
-        force_load(a.load())
-        ppg.run_pipegraph()
+        if inside_ppg():
+            assert not hasattr(a, "df")
+            force_load(a.load())
+        else:
+            assert hasattr(a, "df")
+        run_pipegraph()
         assert hasattr(a, "df")
         assert len(a.df) == 1
         assert "chr" in a.df.columns
@@ -190,7 +159,7 @@ class TestGenomicRegionsLoadingTests:
         repr(a)
         bool(a)
         a.load()
-        ppg.run_pipegraph()
+        run_pipegraph()
         with pytest.raises(TypeError):
             iter(a)
 
@@ -198,43 +167,33 @@ class TestGenomicRegionsLoadingTests:
         def sample_data():
             return pd.DataFrame({"chr": "1", "stop": [1100]})
 
-        a = regions.GenomicRegions("sha", sample_data, [], get_genome())
-        a.write("shu.tsv")
-        with pytest.raises(ppg.RuntimeError) as e:
-            ppg.run_pipegraph()
-        assert len(e.value.exceptions) == 1
+        with RaiseDirectOrInsidePipegraph(ValueError):
+            a = regions.GenomicRegions("sha", sample_data, [], get_genome())
+            force_load(a.load)
 
     def test_loading_missing_chr(self):
         def sample_data():
             return pd.DataFrame({"start": [1000], "stop": [1100]})
 
-        a = regions.GenomicRegions("sha", sample_data, [], get_genome())
-        a.write("shu.tsv")
-        with pytest.raises(ppg.RuntimeError) as e:
-            ppg.run_pipegraph()
-        print("e", e)
-        print("e.value", repr(e.value))
-        assert len(e.value.exceptions) == 1
+        with RaiseDirectOrInsidePipegraph(ValueError):
+            a = regions.GenomicRegions("sha", sample_data, [], get_genome())
+            force_load(a.load)
 
     def test_loading_missing_stop(self):
         def sample_data():
             return pd.DataFrame({"chr": "Chromosome", "start": [1200]})
 
-        a = regions.GenomicRegions("sha", sample_data, [], get_genome())
-        a.write("shu.tsv")
-        with pytest.raises(ppg.RuntimeError) as e:
-            ppg.run_pipegraph()
-            assert len(e.value.exceptions) == 1
+        with RaiseDirectOrInsidePipegraph(ValueError):
+            a = regions.GenomicRegions("sha", sample_data, [], get_genome())
+            force_load(a.load)
 
     def test_loading_raises_on_invalid_chromosome(self):
         def sample_data():
             return pd.DataFrame({"chr": ["1b"], "start": [1200], "stop": [1232]})
 
-        a = regions.GenomicRegions("sharum", sample_data, [], get_genome())
-        a.write("shu.tsv")
-        with pytest.raises(ppg.RuntimeError) as e:
-            ppg.run_pipegraph()
-            assert len(e.value.exceptions) == 1
+        with RaiseDirectOrInsidePipegraph(ValueError):
+            a = regions.GenomicRegions("sharum", sample_data, [], get_genome())
+            force_load(a.load)
 
     def test_loading_raises_on_no_int_start(self):
         def sample_data():
@@ -242,63 +201,33 @@ class TestGenomicRegionsLoadingTests:
                 {"chr": ["Chromosome"], "start": ["shu"], "stop": [1232]}
             )
 
-        a = regions.GenomicRegions("sharum", sample_data, [], get_genome())
-        a.write("shu.tsv")
-        with pytest.raises(ppg.RuntimeError) as e:
-            ppg.run_pipegraph()
-            assert len(e.value.exceptions) == 1
+        with RaiseDirectOrInsidePipegraph(ValueError):
+            a = regions.GenomicRegions("sharum", sample_data, [], get_genome())
+            force_load(a.load)
 
     def test_loading_raises_on_no_int_stop(self):
         def sample_data():
             return pd.DataFrame({"chr": ["Chromosome"], "start": [2], "stop": [20.0]})
 
-        a = regions.GenomicRegions("sharum", sample_data, [], get_genome())
-        a.write("shu.tsv")
-        with pytest.raises(ppg.RuntimeError) as e:
-            ppg.run_pipegraph()
-            assert len(e.value.exceptions) == 1
+        with RaiseDirectOrInsidePipegraph(ValueError):
+            a = regions.GenomicRegions("sharum", sample_data, [], get_genome())
+            force_load(a.load)
 
     def test_loading_raises_on_no_str_chr(self):
         def sample_data():
             return pd.DataFrame({"chr": [1], "start": [2], "stop": [20]})
 
-        a = regions.GenomicRegions("sharum", sample_data, [], get_genome())
-        a.write("shu.tsv")
-        with pytest.raises(ppg.RuntimeError) as e:
-            ppg.run_pipegraph()
-            assert len(e.value.exceptions) == 1
+        with RaiseDirectOrInsidePipegraph(ValueError):
+            a = regions.GenomicRegions("sharum", sample_data, [], get_genome())
+            force_load(a.load)
 
     def test_loading_raises_on_not_dataframe(self):
         def sample_data():
             return None
 
-        a = regions.GenomicRegions("sha", sample_data, [], get_genome())
-        assert not hasattr(a, "df")
-        a.load()
-        with pytest.raises(ppg.RuntimeError) as e:
-            ppg.run_pipegraph()
-            assert len(e.value.exceptions) == 1
-
-    def test_dependency_passing(self):
-        job = ppg.ParameterInvariant("sha", (None,))
-        a = regions.GenomicRegions("shu", lambda: None, [job], get_genome())
-        load_job = a.load()
-        assert job in load_job.lfg.prerequisites
-
-    def test_dependency_may_be_iterable_instead_of_list(self):
-        job = ppg.ParameterInvariant("shu", (None,))
-        a = regions.GenomicRegions("shu", lambda: None, (job,), get_genome())
-        load_job = a.load()
-        assert job in load_job.lfg.prerequisites
-
-    def test_depenencies_must_be_jobs(self):
-        job = ppg.ParameterInvariant("shu", (None,))
-
-        def inner():
-            a = regions.GenomicRegions("shu", lambda: None, ["shu"], get_genome())
-
-        with pytest.raises(ValueError):
-            inner()
+        with RaiseDirectOrInsidePipegraph(ValueError):
+            a = regions.GenomicRegions("sharum", sample_data, [], get_genome())
+            force_load(a.load)
 
     def test_loading_raises_on_overlapping(self):
         def sample_data():
@@ -310,14 +239,12 @@ class TestGenomicRegionsLoadingTests:
                 }
             )
 
-        a = regions.GenomicRegions(
-            "sha", sample_data, [], get_genome(), on_overlap="raise"
-        )
-        assert not hasattr(a, "df")
-        a.load()
-        with pytest.raises(ppg.RuntimeError) as e:
-            ppg.run_pipegraph()
-            assert len(e.value.exceptions) == 1
+        with RaiseDirectOrInsidePipegraph(ValueError):
+
+            a = regions.GenomicRegions(
+                "sha", sample_data, [], get_genome(), on_overlap="raise"
+            )
+            force_load(a.load)
 
     def test_raises_on_negative_intervals(self):
         def sample_data():
@@ -329,11 +256,9 @@ class TestGenomicRegionsLoadingTests:
                 }
             )
 
-        self.a = regions.GenomicRegions("shu", sample_data, [], get_genome_chr_length())
-        self.a.write("shu.tsv")
-        with pytest.raises(ppg.RuntimeError) as e:
-            ppg.run_pipegraph()
-            assert len(e.value.exceptions) == 1
+        with RaiseDirectOrInsidePipegraph(ValueError):
+            a = regions.GenomicRegions("sharum", sample_data, [], get_genome())
+            force_load(a.load)
 
     def test_raises_on_overlapping_intervals(self):
         def sample_data():
@@ -345,11 +270,9 @@ class TestGenomicRegionsLoadingTests:
                 }
             )
 
-        self.a = regions.GenomicRegions("shu", sample_data, [], get_genome_chr_length())
-        self.a.write("shu.tsv")
-        with pytest.raises(ppg.RuntimeError) as e:
-            ppg.run_pipegraph()
-            assert len(e.value.exceptions) == 1
+        with RaiseDirectOrInsidePipegraph(ValueError):
+            a = regions.GenomicRegions("sharum", sample_data, [], get_genome())
+            force_load(a.load)
 
     def test_merges_overlapping_intervals(self):
         def sample_data():
@@ -364,8 +287,8 @@ class TestGenomicRegionsLoadingTests:
         a = regions.GenomicRegions(
             "shu", sample_data, [], get_genome_chr_length(), on_overlap="merge"
         )
-        a.write("shu.tsv")
-        ppg.run_pipegraph()
+        force_load(a.load)
+        run_pipegraph()
         assert len(a.df) == 4
         assert a.df.iloc[0]["start"] == 10
         assert a.df.iloc[0]["stop"] == 1110
@@ -393,8 +316,8 @@ class TestGenomicRegionsLoadingTests:
             get_genome_chr_length(),
             on_overlap=("merge", merge_function),
         )
-        a.write("shu.tsv")
-        ppg.run_pipegraph()
+        force_load(a.load)
+        run_pipegraph()
         assert len(a.df) == 4
         assert a.df.iloc[0]["start"] == 10
         assert a.df.iloc[0]["stop"] == 1110
@@ -423,8 +346,8 @@ class TestGenomicRegionsLoadingTests:
             get_genome_chr_length(),
             on_overlap=("merge", merge_function),
         )
-        a.write("shu.tsv")
-        ppg.run_pipegraph()
+        force_load(a.load)
+        run_pipegraph()
         assert len(a.df) == 4
         assert a.df.iloc[0]["start"] == 10
         assert a.df.iloc[0]["stop"] == 1110
@@ -454,8 +377,8 @@ class TestGenomicRegionsLoadingTests:
             get_genome_chr_length(),
             on_overlap=("merge", merge_function),
         )
-        a.write("shu.tsv")
-        ppg.run_pipegraph()
+        force_load(a.load)
+        run_pipegraph()
         assert len(a.df) == 4
         assert a.df.iloc[0]["start"] == 10
         assert a.df.iloc[0]["stop"] == 1110
@@ -477,18 +400,15 @@ class TestGenomicRegionsLoadingTests:
             row["pick_me"] = numpy.max(subset_df["pick_me"])
             return row
 
-        a = regions.GenomicRegions(
-            "shu",
-            sample_data,
-            [],
-            get_genome_chr_length(),
-            on_overlap=("merge", merge_function),
-        )
-        assert not hasattr(a, "df")
-        a.load()
-        with pytest.raises(ppg.RuntimeError) as e:
-            ppg.run_pipegraph()
-            assert len(e.value.exceptions) == 1
+        with RaiseDirectOrInsidePipegraph(ValueError):
+            a = regions.GenomicRegions(
+                "shu",
+                sample_data,
+                [],
+                get_genome_chr_length(),
+                on_overlap=("merge", merge_function),
+            )
+            force_load(a.load)
 
     def test_merge_overlapping_with_function_raises_on_unknown_column(self):
         def sample_data():
@@ -506,18 +426,15 @@ class TestGenomicRegionsLoadingTests:
             row["does not exist"] = row["pick_me"]
             return row
 
-        a = regions.GenomicRegions(
-            "shu",
-            sample_data,
-            [],
-            get_genome_chr_length(),
-            on_overlap=("merge", merge_function),
-        )
-        assert not hasattr(a, "df")
-        a.load()
-        with pytest.raises(ppg.RuntimeError) as e:
-            ppg.run_pipegraph()
-            assert len(e.value.exceptions) == 1
+        with RaiseDirectOrInsidePipegraph(ValueError):
+            a = regions.GenomicRegions(
+                "shu",
+                sample_data,
+                [],
+                get_genome_chr_length(),
+                on_overlap=("merge", merge_function),
+            )
+            force_load(a.load)
 
     def test_merge_overlapping_with_function_raises_on_missing(self):
         def sample_data():
@@ -535,18 +452,15 @@ class TestGenomicRegionsLoadingTests:
             del row["pick_me"]
             return None
 
-        a = regions.GenomicRegions(
-            "shu",
-            sample_data,
-            [],
-            get_genome_chr_length(),
-            on_overlap=("merge", merge_function),
-        )
-        assert not hasattr(a, "df")
-        a.load()
-        with pytest.raises(ppg.RuntimeError) as e:
-            ppg.run_pipegraph()
-            assert len(e.value.exceptions) == 1
+        with RaiseDirectOrInsidePipegraph(ValueError):
+            a = regions.GenomicRegions(
+                "shu",
+                sample_data,
+                [],
+                get_genome_chr_length(),
+                on_overlap=("merge", merge_function),
+            )
+            force_load(a.load)
 
     def test_merges_overlapping_intervals_next_to_each_other(self):
         def sample_data():
@@ -561,8 +475,8 @@ class TestGenomicRegionsLoadingTests:
         a = regions.GenomicRegions(
             "shu", sample_data, [], get_genome(), on_overlap="merge"
         )
-        a.write("shu.tsv")
-        ppg.run_pipegraph()
+        force_load(a.load)
+        run_pipegraph()
         assert (a.df["start"] == [10, 21]).all()
         assert (a.df["stop"] == [20, 100]).all()
 
@@ -579,9 +493,9 @@ class TestGenomicRegionsLoadingTests:
         a = regions.GenomicRegions(
             "shu", sample_data, [], get_genome(), on_overlap="merge"
         )
-        a.write("shu.tsv")
+        force_load(a.load)
 
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert (a.df["start"] == [3000, 4910]).all()
         assert (a.df["stop"] == [4900, 5000]).all()
 
@@ -598,9 +512,9 @@ class TestGenomicRegionsLoadingTests:
         a = regions.GenomicRegions(
             "shu", sample_data, [], get_genome_chr_length(), on_overlap="merge"
         )
-        a.write("shu.tsv")
+        force_load(a.load)
 
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(a.df) == 4
         assert a.df.iloc[0]["start"] == 10
         assert a.df.iloc[0]["stop"] == 2000
@@ -628,9 +542,9 @@ class TestGenomicRegionsLoadingTests:
             get_genome_chr_length(),
             on_overlap=("merge", merge_function),
         )
-        a.write("shu.tsv")
+        force_load(a.load)
 
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(a.df) == 4
         assert a.df.iloc[0]["start"] == 10
         assert a.df.iloc[0]["stop"] == 2000
@@ -649,8 +563,8 @@ class TestGenomicRegionsLoadingTests:
         a = regions.GenomicRegions(
             "shu", sample_data, [], get_genome_chr_length(), on_overlap="drop"
         )
-        a.write("shu.tsv")
-        ppg.run_pipegraph()
+        force_load(a.load)
+        run_pipegraph()
         assert len(a.df) == 4
         assert a.df.iloc[0]["start"] == 100
         assert a.df.iloc[0]["stop"] == 110
@@ -675,9 +589,9 @@ class TestGenomicRegionsLoadingTests:
         a = regions.GenomicRegions(
             "shu", sample_data, [], get_genome_chr_length(), on_overlap="ignore"
         )
-        a.write("shu.tsv")
+        force_load(a.load)
 
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(a.df) == 7
         assert (a.df.index == [0, 1, 2, 3, 4, 5, 6]).all()
 
@@ -710,26 +624,26 @@ class TestGenomicRegionsLoadingTests:
                     "chr": [
                         str(x)
                         for x in [
-                            9,
-                            9,
-                            9,
-                            9,
-                            9,
-                            9,
-                            9,
-                            9,
-                            9,
-                            9,
-                            9,
-                            "MT",
-                            "MT",
-                            "MT",
-                            "MT",
-                            "MT",
-                            "MT",
-                            "MT",
-                            "MT",
-                            "MT",
+                            "1",
+                            "1",
+                            "1",
+                            "1",
+                            "1",
+                            "1",
+                            "1",
+                            "1",
+                            "1",
+                            "1",
+                            "1",
+                            "2",
+                            "2",
+                            "2",
+                            "2",
+                            "2",
+                            "2",
+                            "2",
+                            "2",
+                            "2",
                         ]
                     ],
                     "stop": [
@@ -757,14 +671,11 @@ class TestGenomicRegionsLoadingTests:
                 }
             )
 
-        a = regions.GenomicRegions(
-            "shu", sample_data, [], get_genome_chr_length(), on_overlap="merge"
-        )
-        a.load()
-        with pytest.raises(ppg.RuntimeError) as e:
-            ppg.run_pipegraph()
-            assert len(e.value.exceptions) == 1
-            assert str(e.value.exceptions).find("All starts need to be positive") != -1
+        with RaiseDirectOrInsidePipegraph(ValueError, "All starts need to be positive"):
+            a = regions.GenomicRegions(
+                "shu", sample_data, [], get_genome_chr_length(), on_overlap="merge"
+            )
+            force_load(a.load)
 
     def test_merge_test(self):
         def sample_data():
@@ -779,9 +690,9 @@ class TestGenomicRegionsLoadingTests:
         a = regions.GenomicRegions(
             "shu", sample_data, [], get_genome_chr_length(), on_overlap="merge"
         )
-        a.write("shu.tsv")
+        force_load(a.load)
 
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(a.df) == 4
         assert a.df.iloc[0]["start"] == 10
         assert a.df.iloc[0]["stop"] == 100
@@ -803,9 +714,9 @@ class TestGenomicRegionsLoadingTests:
             get_genome_chr_length(),
             on_overlap="merge_identical",
         )
-        a.write("shu.tsv")
+        force_load(a.load)
 
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(a.df) == 4
         assert a.df.iloc[0]["start"] == 10
         assert a.df.iloc[0]["stop"] == 100
@@ -820,16 +731,15 @@ class TestGenomicRegionsLoadingTests:
                 }
             )
 
-        a = regions.GenomicRegions(
-            "shu",
-            sample_data,
-            [],
-            get_genome_chr_length(),
-            on_overlap="merge_identical",
-        )
-        with pytest.raises(ppg.RuntimeError) as e:
-            ppg.run_pipegraph()
-            assert len(e.value.exceptions) == 1
+        with RaiseDirectOrInsidePipegraph(ValueError):
+            a = regions.GenomicRegions(
+                "shu",
+                sample_data,
+                [],
+                get_genome_chr_length(),
+                on_overlap="merge_identical",
+            )
+            force_load(a.load)
 
     def test_plot_job(self):
         def sample_data():
@@ -845,12 +755,20 @@ class TestGenomicRegionsLoadingTests:
             "shu", sample_data, [], get_genome_chr_length(), on_overlap="merge"
         )
         pj = x.plot(
-            "cache/shu.png", lambda df: dp(df).p9().add_scatter("chr", "start").pd
+            "shu.png",
+            lambda df: dp(df)
+            .p9()
+            .add_scatter("chr", "start")
+            .pd,  # also tests the write-to-result_dir_part
         )
-        assert isinstance(pj, ppg.FileGeneratingJob)
-        assert pj.filenames[0] == "cache/shu.png"
-        ppg.run_pipegraph()
-        assert_image_equal("cache/shu.png")
+        fn = "results/GenomicRegions/shu/shu.png"
+        if inside_ppg():
+            assert isinstance(pj, ppg.FileGeneratingJob)
+            assert pj.filenames[0] == fn
+        else:
+            assert str(pj) == fn
+        run_pipegraph()
+        assert_image_equal(fn)
 
     def test_plot_job_with_custom_calc_function(self):
         def sample_data():
@@ -872,97 +790,22 @@ class TestGenomicRegionsLoadingTests:
             return df
 
         pj = x.plot(
-            "cache/shu.png", lambda df: dp(df).p9().add_scatter("shu", "start"), calc
+            Path("shu.png").absolute(),
+            lambda df: dp(df).p9().add_scatter("shu", "start"),
+            calc,
         )
-        assert isinstance(pj, ppg.FileGeneratingJob)
-        assert pj.filenames[0] == "cache/shu.png"
-        ppg.run_pipegraph()
-        assert_image_equal("cache/shu.png")
+        fn = str(Path("shu.png").absolute())
+        if inside_ppg():
+            assert isinstance(pj, ppg.FileGeneratingJob)
+            assert pj.filenames[0] == fn
+        else:
+            assert str(pj) == fn
+        run_pipegraph()
+        assert_image_equal(fn)
 
 
 @pytest.mark.usefixtures("new_pipegraph")
-class GenomicRegionsCacheLoadingTests:
-    def test_loading_cache(self, new_pipegraph):
-        def sample_data():
-            op = open("cache/t.txt", "wb")
-            op.write(b"shu")
-            op.close()
-            return pd.DataFrame(
-                {"chr": ["Chromosome"], "start": [1000], "stop": [1100]}
-            )
-
-        a = regions.GenomicRegions("sha", sample_data, [], get_genome(), cache=True)
-        assert not hasattr(a, "df")
-        a.write("shu.tsv")
-        ppg.run_pipegraph()
-        assert hasattr(a, "df")
-        assert len(a.df) == 1
-        assert "chr" in a.df.columns
-        assert "start" in a.df.columns
-        assert "stop" in a.df.columns
-        assert os.path.exists("cache/t.txt")
-        os.unlink("cache/t.txt")
-        os.unlink("shu.tsv")
-        ppg.util.global_pipegraph.dump_invariant_status()
-
-        # new_pipegraph.new_pipegraph() would also reset the jobstatus..
-        # pypipeline.jobs.clear_job_cache() #otherwise, the jobs ain't truly
-        # gone...
-        new_pipegraph.new_pipegraph()
-
-        a = regions.GenomicRegions("sha", sample_data, [], get_genome(), cache=True)
-        assert not hasattr(a, "df")
-        a.write("shu.tsv")
-        ppg.run_pipegraph()
-        assert hasattr(a, "df")
-        assert len(a.df) == 1
-        assert "chr" in a.df.columns
-        assert "start" in a.df.columns
-        assert "stop" in a.df.columns
-        assert not os.path.exists("cache/t.txt")
-
-    def test_cached_loading_with_later_union(self):
-        def sample_data_a():
-            return pd.DataFrame(
-                {"chr": ["Chromosome"], "start": [1000], "stop": [1100]}
-            )
-
-        genome = get_genome()
-        a = regions.GenomicRegions("sha", sample_data_a, [], genome, cache=True)
-
-        def sample_data_b():
-            return pd.DataFrame(
-                {"chr": ["Chromosome"], "start": [1050], "stop": [1150]}
-            )
-
-        b = regions.GenomicRegions("shb", sample_data_b, [], genome, cache=True)
-        c = a.union("shc", b)
-        c.write("shu.tsv")
-        ppg.run_pipegraph()
-        assert c.df.iloc[0]["start"] == 1000
-        assert c.df.iloc[0]["stop"] == 1150
-        assert len(c.df) == 1
-
-    def test_later_cached(self):
-        def sample_data_a():
-            return pd.DataFrame(
-                {"chr": ["1", "2"], "start": [1000, 2000], "stop": [1100, 2200]}
-            )
-
-        a = regions.GenomicRegions(
-            "sha", sample_data_a, [], get_genome_chr_length(), cache=False
-        )
-        b = a.filter("shb", lambda df: df["chr"] == "2")
-        c = b.convert("shx", lambda df: df, on_overlap="merge", cache=True)
-        c.write("shu.tsv")
-        ppg.run_pipegraph()
-        assert c.df.iloc[0]["start"] == 2000
-        assert c.df.iloc[0]["stop"] == 2200
-        assert len(c.df) == 1
-
-
-@pytest.mark.usefixtures("new_pipegraph")
-class TestGenomicRegionsAnnotation:
+class TestGenomicRegionsAnnotationDependencyies:
     def setUp(self):
         def sample_data():
             df = pd.DataFrame(
@@ -979,10 +822,30 @@ class TestGenomicRegionsAnnotation:
 
     def test_anno_job_depends_on_load(self):
         self.setUp()
-        assert not hasattr(self.a, "df")
+        if inside_ppg():
+            assert not hasattr(self.a, "df")
+        else:
+            assert hasattr(self.a, "df")
         ca = Constant("Constant", 5)
         anno_job = self.a.add_annotator(ca)
         assert isinstance(anno_job(), ppg.Job)
+
+
+@pytest.mark.usefixtures("both_ppg_and_no_ppg")
+class TestGenomicRegionsAnnotation:
+    def setUp(self):
+        def sample_data():
+            df = pd.DataFrame(
+                {
+                    "chr": ["1", "2", "1", "3", "5"],
+                    "start": [10, 100, 1000, 10000, 100_000],
+                    "stop": [12, 110, 1110, 11110, 111_110],
+                }
+            )
+            df = df.assign(summit=df["start"] + (df["stop"] - df["start"]) / 2)
+            return df
+
+        self.a = regions.GenomicRegions("shu", sample_data, [], get_genome_chr_length())
 
     def test_anno_jobs_are_singletonic(self):
         self.setUp()
@@ -1019,12 +882,12 @@ class TestGenomicRegionsAnnotation:
         ca = Constant("Constant", 5)
         assert len(self.a.annotators) == 1
         anno_job = self.a.add_annotator(ca)
-        force_load(self.a.annotate())
-        ppg.run_pipegraph()
+        force_load(self.a.annotate(), "test_anno_jobs_add_columns")
+        run_pipegraph()
         assert ca.columns[0] in self.a.df.columns
 
 
-@pytest.mark.usefixtures("new_pipegraph")
+@pytest.mark.usefixtures("both_ppg_and_no_ppg")
 class TestGenomicRegionsWritingTests:
     def setUp(self):
         def sample_data():
@@ -1049,7 +912,7 @@ class TestGenomicRegionsWritingTests:
         from mbf_fileformats.bed import read_bed
 
         self.a.write_bed(self.sample_filename)
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(self.a.df) > 0
         read = read_bed(self.sample_filename)
         assert len(read) == len(self.a.df)
@@ -1072,7 +935,7 @@ class TestGenomicRegionsWritingTests:
     def test_write(self):
         self.setUp()
         self.a.write(self.sample_filename)
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(self.a.df) > 0
         df = pd.read_csv(self.sample_filename, sep="\t")
         df["chr"] = df["chr"].astype(str)
@@ -1083,7 +946,7 @@ class TestGenomicRegionsWritingTests:
         self.setUp()
         self.a.result_dir = ""
         self.a.write()
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert os.path.exists("shu.tsv")
         os.unlink("shu.tsv")
 
@@ -1092,7 +955,7 @@ class TestGenomicRegionsWritingTests:
         # sorting by chromosome means they would've been equal anyhow, since we
         # internally sort by chr
         self.a.write(self.sample_filename, lambda df: df.sort_values("start"))
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(self.a.df) > 0
         df = pd.read_csv(self.sample_filename, sep="\t")
         df["chr"] = df["chr"].astype(str)
@@ -1104,13 +967,15 @@ class TestGenomicRegionsWritingTests:
     def test_plot_plots(self):
         self.setUp()
 
-        pj = self.a.plot(
-            "cache/shu.png", lambda df: dp(df).p9().add_scatter("start", "stop")
-        )
-        assert isinstance(pj, ppg.FileGeneratingJob)
-        assert pj.filenames[0] == "cache/shu.png"
-        ppg.run_pipegraph()
-        assert_image_equal("cache/shu.png")
+        pj = self.a.plot("shu.png", lambda df: dp(df).p9().add_scatter("start", "stop"))
+        fn = "results/GenomicRegions/shu/shu.png"
+        if inside_ppg():
+            assert isinstance(pj, ppg.FileGeneratingJob)
+            assert pj.filenames[0] == fn
+        else:
+            assert str(pj) == fn
+        run_pipegraph()
+        assert_image_equal(fn)
 
 
 class GRNameAnnotator(Annotator):
@@ -1126,6 +991,57 @@ class GRNameAnnotator(Annotator):
 
 
 @pytest.mark.usefixtures("new_pipegraph")
+class TestFilterTestDependencies:
+    def setUp(self):
+        def sample_data():
+            return pd.DataFrame(
+                {
+                    "chr": ["1", "2", "1", "3", "5"],
+                    "start": [10, 100, 1000, 10000, 100_000],
+                    "stop": [11, 110, 1110, 11110, 111_110],
+                }
+            )
+
+        self.genome = get_genome_chr_length()
+        self.a = regions.GenomicRegions("shu", sample_data, [], self.genome)
+
+    def test_dependecies(self):
+        self.setUp()
+        job = ppg.ParameterInvariant("shu_param", (None,))
+        b = self.a.filter("sha", lambda df: df["chr"] == "1", dependencies=[job])
+        force_load(b.load())
+        assert job in b.load().lfg.prerequisites
+        run_pipegraph()
+        assert len(b.df) == 2
+
+    def test_filter_can_depend_on_anno_jobs(self):
+        self.setUp()
+        anno = Constant("Constant", 5)
+        anno_job = self.a.add_annotator(anno)
+
+        def filter(df):
+            return df[anno.columns[0]] == 5
+
+        b = self.a.filter("sha", filter, dependencies=[anno_job])
+        b.write("shu.tsv")
+        run_pipegraph()
+        # self.assertTrue(len(b.df) == 5)
+
+    def test_filter_can_depend_on_single_job(self):
+        self.setUp()
+        anno = Constant("Constant", 5)
+        anno_job = self.a.add_annotator(anno)
+
+        def filter(df):
+            return df[anno.columns[0]] == 5
+
+        b = self.a.filter("sha", filter, dependencies=[anno_job])
+        b.write("shu.tsv")
+        run_pipegraph()
+        assert len(b.df) == 5
+
+
+@pytest.mark.usefixtures("both_ppg_and_no_ppg")
 class TestFilterTests:
     def setUp(self):
         def sample_data():
@@ -1143,8 +1059,8 @@ class TestFilterTests:
     def test_filtering(self):
         self.setUp()
         b = self.a.filter("sha", lambda df: df["chr"] == "1")
-        jg = ppg.JobGeneratingJob("dummy2", lambda: None).depends_on(b.load())
-        ppg.run_pipegraph()
+        force_load(b.load)
+        run_pipegraph()
         assert len(b.df) == 2
         assert (b.df["start"] == [10, 1000]).all()
 
@@ -1156,8 +1072,8 @@ class TestFilterTests:
     def test_sorting(self):
         self.setUp()
         b = self.a.filter("sha", lambda df: df.sort_values("chr").index)
-        jg = ppg.JobGeneratingJob("dummy2", lambda: None).depends_on(b.load())
-        ppg.run_pipegraph()
+        force_load(b.load)
+        run_pipegraph()
         assert len(b.df) == len(self.a.df)
         assert (b.df["chr"] == ["1", "1", "2", "3", "5"]).all()
         assert (b.df["start"] == [10, 1000, 100, 10000, 100_000]).all()
@@ -1167,8 +1083,8 @@ class TestFilterTests:
         b = self.a.filter(
             "sha", lambda df: df.sort_values("start", ascending=False)[:2].index
         )
-        jg = ppg.JobGeneratingJob("dummy2", lambda: None).depends_on(b.load())
-        ppg.run_pipegraph()
+        force_load(b.load)
+        run_pipegraph()
         assert len(b.df) == 2
         assert b.df.iloc[1]["chr"] == "5"
         assert b.df.iloc[0]["chr"] == "3"
@@ -1179,21 +1095,11 @@ class TestFilterTests:
 
     def test_select_top_k_raises_on_non_int(self):
         self.setUp()
-        b = self.a.filter(
-            "sha", lambda df: df.sort_values("start", ascending=False)[:2.0]
-        )
-        with pytest.raises(ppg.RuntimeError) as e:
-            ppg.run_pipegraph()
-        assert isinstance(e.value.exceptions[0], TypeError)
-
-    def test_dependecies(self):
-        self.setUp()
-        job = ppg.ParameterInvariant("shu_param", (None,))
-        b = self.a.filter("sha", lambda df: df["chr"] == "1", dependencies=[job])
-        force_load(b.load())
-        assert job in b.load().lfg.prerequisites
-        ppg.run_pipegraph()
-        assert len(b.df) == 2
+        with RaiseDirectOrInsidePipegraph(TypeError):
+            b = self.a.filter(
+                "sha", lambda df: df.sort_values("start", ascending=False)[:2.0]
+            )
+            force_load(b.load)
 
     def test_annotator_inheritance(self):
         self.setUp()
@@ -1201,39 +1107,13 @@ class TestFilterTests:
         self.a.add_annotator(anno)
         b = self.a.filter("sha", lambda df: df["chr"] == "1")
         assert b.has_annotator(anno)
-        jg = ppg.JobGeneratingJob("dummy", lambda: None).depends_on(self.a.annotate())
-        jg = ppg.JobGeneratingJob("dummy2", lambda: None).depends_on(b.annotate())
-        ppg.run_pipegraph()
+        force_load(self.a.annotate, "test_annotator_inheritance")
+        force_load(b.annotate, "test_annotator_inheritanceb")
+        run_pipegraph()
         assert len(self.a.df) == 5
         assert len(b.df) == 2
         assert self.a.df.iloc[0][anno.columns[0]] == self.a.name
         assert b.df.iloc[0][anno.columns[0]] == self.a.name
-
-    def test_filter_can_depend_on_anno_jobs(self):
-        self.setUp()
-        anno = Constant("Constant", 5)
-        anno_job = self.a.add_annotator(anno)
-
-        def filter(df):
-            return df[anno.columns[0]] == 5
-
-        b = self.a.filter("sha", filter, dependencies=[anno_job])
-        b.write("shu.tsv")
-        ppg.run_pipegraph()
-        # self.assertTrue(len(b.df) == 5)
-
-    def test_filter_can_depend_on_single_job(self):
-        self.setUp()
-        anno = Constant("Constant", 5)
-        anno_job = self.a.add_annotator(anno)
-
-        def filter(df):
-            return df[anno.columns[0]] == 5
-
-        b = self.a.filter("sha", filter, dependencies=[anno_job])
-        b.write("shu.tsv")
-        ppg.run_pipegraph()
-        assert len(b.df) == 5
 
     def test_filter_remove_overlapping(self):
         self.setUp()
@@ -1244,7 +1124,7 @@ class TestFilterTests:
         b = regions.GenomicRegions("b", sample_data, [], self.genome)
         c = self.a.filter_remove_overlapping("c", b)
         c.write("shu.tsv")
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(c.df) == 4
         assert (c.df["start"] == [10, 100, 10000, 100_000]).all()
 
@@ -1257,7 +1137,7 @@ class TestFilterTests:
         b = regions.GenomicRegions("b", sample_data, [], self.genome)
         c = self.a.filter_to_overlapping("c", b)
         c.write("shu.tsv")
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(c.df) == 1
         assert (c.df["chr"] == ["1"]).all()
         assert (c.df["start"] == [1000]).all()
@@ -1277,14 +1157,14 @@ class TestFilterTests:
         b = regions.GenomicRegions("b", sample_data, [], get_genome_chr_length())
         c = b.filter("c", df_filter_function=lambda df: df["chr"] == "1")
         c.write("shu.tsv")
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(c.df) == 2
         assert (c.df["chr"] == ["1", "1"]).all()
         assert (c.df["start"] == [10, 1000]).all()
         assert (c.df["hello"] == [1, 3]).all()
 
 
-@pytest.mark.usefixtures("new_pipegraph")
+@pytest.mark.usefixtures("both_ppg_and_no_ppg")
 class TestIntervalTests:
     def setUp(self):
         def sample_data():
@@ -1302,7 +1182,7 @@ class TestIntervalTests:
     def test_overlapping(self):
         self.setUp()
         force_load(self.a.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         found = self.a.get_overlapping("1", 800, 1001)
         assert len(found) == 1
 
@@ -1314,7 +1194,7 @@ class TestIntervalTests:
 
         a = regions.GenomicRegions("a", sample_data, [], self.genome)
         force_load(a.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         print(dir(a))
         assert not len(a.get_overlapping("1", 5, 99))
         assert not len(a.get_overlapping("1", 5, 100))
@@ -1328,7 +1208,7 @@ class TestIntervalTests:
 
         a = regions.GenomicRegions("a", sample_data, [], self.genome)
         force_load(a.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         g = a.get_overlapping_generator()
         assert not len(g("1", 5, 99))
         assert not len(g("1", 5, 100))
@@ -1347,7 +1227,7 @@ class TestIntervalTests:
 
         a = regions.GenomicRegions("sha", sample_data, [], self.genome)
         force_load(a.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         # emtpy query
         assert not a.has_overlapping("1", 7_778_885, 7_778_885)
         assert a.has_overlapping("1", 7_778_885, 7_778_886)
@@ -1370,7 +1250,7 @@ class TestIntervalTests:
 
         a = regions.GenomicRegions("sha", sample_data, [], self.genome)
         force_load(a.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         h = a.has_overlapping_generator()
         g = a.get_overlapping_generator()
         assert not h("1", 7_778_885, 7_778_885)  # emtpy query
@@ -1384,13 +1264,13 @@ class TestIntervalTests:
     def test_has_overlapping(self):
         self.setUp()
         force_load(self.a.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert self.a.has_overlapping("1", 800, 1001)
 
     def test_has_overlapping_generator_simple(self):
         self.setUp()
         force_load(self.a.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         g = self.a.has_overlapping_generator()
         res = []
         for chr, start, stop in [("1", 800, 1001)]:
@@ -1400,7 +1280,7 @@ class TestIntervalTests:
     def test_overlapping_point(self):
         self.setUp()
         force_load(self.a.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         found = self.a.get_overlapping("2", 105, 106)
         assert len(found) == 1
         found = self.a.get_overlapping("2", 105, 105)
@@ -1409,14 +1289,14 @@ class TestIntervalTests:
     def test_has_overlapping_point(self):
         self.setUp()
         force_load(self.a.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert not self.a.has_overlapping("2", 105, 105)
         assert self.a.has_overlapping("2", 105, 106)
 
     def test_has_overlapping_generator_point(self):
         self.setUp()
         force_load(self.a.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         g = self.a.has_overlapping_generator()
         res = []
         for chr, start, stop in [("2", 105, 105), ("2", 105, 106)]:
@@ -1426,7 +1306,7 @@ class TestIntervalTests:
     def test_has_overlapping_generator_point_raises_on_going_back(self):
         self.setUp()
         force_load(self.a.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         g = self.a.has_overlapping_generator()
         res = []
         assert g("2", 105, 106)
@@ -1440,7 +1320,7 @@ class TestIntervalTests:
         self.setUp()
         # note that the generator restarts when you switch a chromosome.
         force_load(self.a.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         g = self.a.has_overlapping_generator()
         res = []
         for chr, start, stop in [
@@ -1463,7 +1343,7 @@ class TestIntervalTests:
         # note that the generator restarts when you switch a chromosome.
         b = self.a.filter("b", lambda df: df["chr"] == "1")
         force_load(b.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         g = b.has_overlapping_generator()
         res = []
         for chr, start, stop in [
@@ -1484,7 +1364,7 @@ class TestIntervalTests:
     def test_non_overlapping(self):
         self.setUp()
         force_load(self.a.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         found = self.a.get_overlapping("1", 1200, 1300)
         assert len(found) == 0
         assert isinstance(found, pd.DataFrame)
@@ -1496,7 +1376,7 @@ class TestIntervalTests:
     def test_has_overlapping_not(self):
         self.setUp()
         force_load(self.a.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert not self.a.has_overlapping("1", 1200, 1300)
 
     def test_build_intervals_works_with_empty_df(self):
@@ -1507,7 +1387,7 @@ class TestIntervalTests:
 
         b = regions.GenomicRegions("shub", sample_data, [], get_genome())
         force_load(b.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(b.df) == 0
         assert not len(b.get_overlapping("1", 0, 10000))
         assert not b.has_overlapping("1", 0, 10000)
@@ -1516,7 +1396,7 @@ class TestIntervalTests:
     def test_closest(self):
         self.setUp()
         force_load(self.a.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         found = self.a.get_closest("1", 5)
         assert len(found) == 1
         assert found.iloc[0]["chr"] == "1"
@@ -1602,43 +1482,35 @@ class TestIntervalTests:
 
         b = regions.GenomicRegions("shbu", sample_data, [], get_genome())
         force_load(b.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         closest = b.get_closest("Chromosome", 1_015_327)
         assert len(closest)
         assert closest.iloc[0]["chr"] == "Chromosome"
         assert closest.iloc[0]["start"] == 1_051_311
 
 
-@pytest.mark.usefixtures("new_pipegraph")
+@pytest.mark.usefixtures("both_ppg_and_no_ppg")
 class TestIntervalTestsNeedingOverlapHandling(TestIntervalTests):
-    def setUp(self):
+    def test_nested(self):
         def sample_data():
             return pd.DataFrame(
                 {
-                    "chr": ["1", "2", "1", "3", "5"],
-                    "start": [10, 100, 1000, 10000, 100_000],
-                    "stop": [11, 110, 1110, 11110, 111_110],
+                    "chr": ["1", "1", "1", "1", "3"],
+                    "start": [10, 25, 30, 100, 0],
+                    "stop": [25, 35, 35, 110, 100],
                 }
             )
 
-        self.genome = get_genome_chr_length()
-        self.a = regions.GenomicRegions(
-            "shu", sample_data, [], self.genome, on_overlap="ignore"
-        )
-
-    def test_closest(self):
-        self.setUp()
-        self.a.build_intervals()
-
-        def inner():
-            ppg.run_pipegraph()
-
-        inner()
-        # TODO: extend?!
-        # self.assertRaises(ValueError, inner) #for bx is currently broken..
+        genome = get_genome_chr_length()
+        a = regions.GenomicRegions("shu", sample_data, [], genome, on_overlap="ignore")
+        force_load(a.build_intervals())
+        run_pipegraph()
+        assert (a.get_overlapping("1", 25, 26).start == [25]).all()
+        assert (a.get_overlapping("1", 15, 26).start == [10, 25]).all()
+        assert (a.get_overlapping("1", 30, 40).start == [25, 30]).all()
 
 
-@pytest.mark.usefixtures("new_pipegraph")
+@pytest.mark.usefixtures("both_ppg_and_no_ppg")
 class TestAssortedGenomicRegionTests:
     def test_get_no_of_entries(self):
         def sample_data():
@@ -1651,8 +1523,8 @@ class TestAssortedGenomicRegionTests:
             )
 
         a = regions.GenomicRegions("shu", sample_data, [], get_genome_chr_length())
-        a.write("shu.tsv")
-        ppg.run_pipegraph()
+        force_load(a.load)
+        run_pipegraph()
         assert a.get_no_of_entries() == 5
 
     def test_get_covered_bases(self):
@@ -1666,8 +1538,8 @@ class TestAssortedGenomicRegionTests:
             )
 
         a = regions.GenomicRegions("shu", sample_data, [], get_genome_chr_length())
-        a.write("shu.tsv")
-        ppg.run_pipegraph()
+        force_load(a.load)
+        run_pipegraph()
         assert a.covered_bases == 1 + 10 + 110 + 1110 + 11110
 
     def test_get_covered_bases_raises_on_possible_overlaps(self):
@@ -1684,7 +1556,7 @@ class TestAssortedGenomicRegionTests:
             "shu", sample_data, [], get_genome_chr_length(), on_overlap="ignore"
         )
         force_load(a.load())
-        ppg.run_pipegraph()
+        run_pipegraph()
 
         with pytest.raises(ValueError):
             a.covered_bases
@@ -1700,14 +1572,17 @@ class TestAssortedGenomicRegionTests:
             )
 
         a = regions.GenomicRegions("shu", sample_data, [], get_genome_chr_length())
-        a.write("shu.tsv")
-        ppg.run_pipegraph()
+        force_load(a.load)
+        run_pipegraph()
         assert a.mean_size == (1.0 + 10 + 110 + 1110 + 11110) / 5
 
 
-@pytest.mark.usefixtures("new_pipegraph")
+@pytest.mark.usefixtures("both_ppg_and_no_ppg")
 class TestSetOperationsOnGenomicRegionsTest:
     def sample_to_gr(self, a, name, on_overlap="merge"):
+        if not hasattr(self, "genome"):
+            self.genome = get_genome()
+
         def sample_a(a=a):
             data = {"chr": [], "start": [], "stop": []}
             for start, stop in a:
@@ -1717,7 +1592,7 @@ class TestSetOperationsOnGenomicRegionsTest:
             return pd.DataFrame(data)
 
         a = regions.GenomicRegions(
-            name, sample_a, [], get_genome(), on_overlap=on_overlap
+            name, sample_a, [], self.genome, on_overlap=on_overlap
         )
         return a
 
@@ -1726,7 +1601,7 @@ class TestSetOperationsOnGenomicRegionsTest:
         b = self.sample_to_gr(b, "b")
         c = operation(a, "c", b)
         c.write("shu.tsv")
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(should) == len(c.df)
         starts = []
         stops = []
@@ -1830,7 +1705,7 @@ class TestSetOperationsOnGenomicRegionsTest:
         b = self.sample_to_gr(b, "b")
         c = regions.GenomicRegions_Common("c", [a, b])
         c.write()
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert (c.df["start"] == [10]).all()
         assert (c.df["stop"] == [120]).all()
 
@@ -1925,7 +1800,7 @@ class TestSetOperationsOnGenomicRegionsTest:
         )
         force_load(b.load())
         force_load(should.load())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert (b.df == should.df).all().all()
 
     def test_invert_twice(self):
@@ -1942,7 +1817,7 @@ class TestSetOperationsOnGenomicRegionsTest:
         b = a.invert("b")
         c = b.invert("c")
         force_load(c.load())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert (c.df == a.df).all().all()
 
     def test_invert_preserves_annos(self):
@@ -1962,7 +1837,7 @@ class TestSetOperationsOnGenomicRegionsTest:
         force_load(a.build_intervals())
         b.load()
         force_load(b.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert a.overlap_basepair(b) == 20
         assert b.overlap_basepair(a) == 20
 
@@ -1975,7 +1850,7 @@ class TestSetOperationsOnGenomicRegionsTest:
         force_load(a.build_intervals())
         b.load()
         force_load(b.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert a.overlap_basepair(b) == a.covered_bases
 
     def test_overlap_basepairs_identical_plus_overlapping(self):
@@ -1987,7 +1862,7 @@ class TestSetOperationsOnGenomicRegionsTest:
         force_load(a.build_intervals())
         b.load()
         force_load(b.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert a.overlap_basepair(b) == a.covered_bases
 
     def test_overlap_percentage(self):
@@ -1999,7 +1874,7 @@ class TestSetOperationsOnGenomicRegionsTest:
         force_load(a.build_intervals())
         b.load()
         force_load(b.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert a.overlap_percentage(b) == 20 / (40 + 100.0)
         assert b.overlap_percentage(a) == 20 / (40 + 100.0)
 
@@ -2012,7 +1887,7 @@ class TestSetOperationsOnGenomicRegionsTest:
         force_load(a.build_intervals())
         b.load()
         force_load(b.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert a.intersection_count(b) == 1
         assert b.intersection_count(a) == 1
 
@@ -2028,7 +1903,7 @@ class TestSetOperationsOnGenomicRegionsTest:
         force_load(b.build_intervals())
         force_load(just_a.load())
         force_load(just_b.load())
-        ppg.run_pipegraph()
+        run_pipegraph()
         # coming this way, we only have one intersection
         assert len(a.df) - len(just_a.df) == a.intersection_count(b)
         # coming this way, it's two of them
@@ -2043,7 +1918,7 @@ class TestSetOperationsOnGenomicRegionsTest:
         force_load(a.build_intervals())
         b.load()
         force_load(b.build_intervals())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert a.overlap_count(b) == 1
         assert b.overlap_count(a) == 1
 
@@ -2061,7 +1936,7 @@ class TestSetOperationsOnGenomicRegionsTest:
         force_load(just_b.load())
         both = a.overlapping("ab", b)
         force_load(both.load())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert a.overlap_count(b) == 2
         assert b.overlap_count(a) == 2
         assert len(just_a.df) == 1
@@ -2083,7 +1958,7 @@ class TestSetOperationsOnGenomicRegionsTest:
         m2 = b.overlapping("ba", a)
         force_load(m1.load())
         force_load(m2.load())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(m1.df) == 1
         assert len(m2.df) == 1
         assert a.overlap_count(b) == 1
@@ -2102,7 +1977,7 @@ class TestSetOperationsOnGenomicRegionsTest:
 
         force_load(m1.load())
         force_load(m2.load())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(m1.df) == 1
         assert len(m2.df) == 1
         assert a.overlap_count(b) == 1
@@ -2159,7 +2034,7 @@ class TestSetOperationsOnGenomicRegionsTest:
             inner_intersection_count()
         force_load(a.load())
         force_load(b.load())
-        ppg.run_pipegraph()
+        run_pipegraph()
 
         def inner_iter_intersections():
             next(a._iter_intersections(b))
@@ -2168,29 +2043,7 @@ class TestSetOperationsOnGenomicRegionsTest:
             inner_iter_intersections()
 
 
-@pytest.mark.usefixtures("new_pipegraph")
-class TestGenomicRegionSourceTest:
-    def test_manual_source(self):
-        def sample_data():
-            import random
-
-            start = random.randint(0, 10000)
-            stop = start + random.randint(1, 3000)
-            return pd.DataFrame(
-                {"chr": ["Chromosome"], "start": [start], "stop": [stop]}
-            )
-
-        genome = get_genome()
-        a = regions.GenomicRegions("sha", sample_data, [], genome)
-        b = regions.GenomicRegions("shb", sample_data, [], genome)
-        c = regions.GenomicRegions("shc", sample_data, [], genome)
-        all = [a, b, c]
-        source = regions.GenomicRegionsSource("mysource", all)
-        assert hasattr(source, "get_dependencies")
-        assert all == list(source)
-
-
-@pytest.mark.usefixtures("new_pipegraph")
+@pytest.mark.usefixtures("both_ppg_and_no_ppg")
 class TestFromXYZTests:
     def test_gff(self):
         a = regions.GenomicRegions_FromGFF(
@@ -2202,7 +2055,7 @@ class TestFromXYZTests:
             comment_char="#",
         )
         force_load(a.load())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(a.df) == 4
         assert (a.df["chr"] == ["2", "3", "3", "3"]).all()
         assert (a.df["start"] == [662_743, 53968, 58681, 68187]).all()
@@ -2228,7 +2081,7 @@ class TestFromXYZTests:
             chromosome_mangler=lambda chr: str(int(chr) + 1),
         )
         force_load(a.load())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(a.df) == 4
         assert (a.df["chr"] == ["3", "4", "4", "4"]).all()
         assert (a.df["start"] == [662_743, 53968, 58681, 68187]).all()
@@ -2247,7 +2100,7 @@ class TestFromXYZTests:
             "shu", data_path / "test.bed", get_genome_chr_length()
         )
         force_load(a.load())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(a.df) == 6
         assert (a.df["chr"] == ["2", "2", "2", "3", "3", "3"]).all()
         assert (
@@ -2273,7 +2126,7 @@ class TestFromXYZTests:
             "shu", data_path / "test_without_score.bed", get_genome_chr_length()
         )
         force_load(a.load())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(a.df) == 6
         assert (a.df["chr"] == ["2", "2", "2", "3", "3", "3"]).all()
         assert (
@@ -2290,7 +2143,7 @@ class TestFromXYZTests:
             enlarge_3prime=1,
         )
         force_load(a.load())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(a.df) == 5
         assert (a.df["chr"] == ["3", "3", "3", "3", "3"]).all()
         assert (a.df["start"] + 2 == [2, 41, 81, 120, 158]).all()
@@ -2314,7 +2167,7 @@ class TestFromXYZTests:
             "shu", data_path / "test_partec.txt", get_genome_chr_length()
         )
         force_load(a.load())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(a.df) == 5
         assert (a.df["chr"] == ["1", "2", "2", "4", "5"]).all()
         assert (
@@ -2327,14 +2180,10 @@ class TestFromXYZTests:
         ).all()
 
 
-@pytest.mark.usefixtures("new_pipegraph")
+@pytest.mark.usefixtures("no_pipegraph")
 class TestOutsideOfPipegraph:
     def test_ignores_second_loading(self):
-        precalc_genome= get_genome_chr_length()
-        ppg.run_pipegraph()
-        ppg.util.global_pipegraph = None
-        genome = InteractiveFileBasedGenome(precalc_genome.name, precalc_genome.cache_dir)
-        genome.get_chromosome_lengths = precalc_genome.get_chromosome_lengths
+        genome = get_genome_chr_length()
         counter = [0]
 
         def sample_data():
@@ -2347,34 +2196,9 @@ class TestOutsideOfPipegraph:
                 }
             )
 
-        a = regions.GenomicRegions(
-            "shu", sample_data, [], genome, on_overlap="merge"
-        )
+        a = regions.GenomicRegions("shu", sample_data, [], genome, on_overlap="merge")
         assert counter[0] == 1  # load is immediate
         a.load()
         assert counter[0] == 1
         a.load()
         assert counter[0] == 1
-
-    def test_plot_job(self):
-        precalc_genome= get_genome_chr_length()
-        ppg.run_pipegraph()
-        ppg.util.global_pipegraph = None
-        genome = InteractiveFileBasedGenome(precalc_genome.name, precalc_genome.cache_dir)
-        genome.get_chromosome_lengths = precalc_genome.get_chromosome_lengths
-        def sample_data():
-            return pd.DataFrame(
-                {
-                    "chr": ["1", "2", "1", "3", "5"],
-                    "start": [10, 100, 1000, 10000, 100_000],
-                    "stop": [1010, 110, 1110, 11110, 111_110],
-                }
-            )
-
-        x = regions.GenomicRegions(
-            "shu", sample_data, [], genome, on_overlap="merge"
-        )
-        pj = x.plot(
-            "cache/shu.png", lambda df: dp(df).p9().add_scatter("chr", "start").pd
-        )
-        assert_image_equal("cache/shu.png")

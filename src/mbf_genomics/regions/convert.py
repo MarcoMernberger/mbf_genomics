@@ -146,12 +146,15 @@ def merge_connected():
 
 
 class LiftOver(object):
-    data_path = file_path / "liftOvers"
+    def __init__(self):
+        import mbf_genomes
+        from  mbf_externals.kent import LiftOver as LiftOverAlgorithm
+        self.data_path = mbf_genomes.data_path / "liftovers"
+        self.replacements = {"hg19to38": {"11_gl000202_random": "GL000202.1"}}
+        self.algo = LiftOverAlgorithm()
+        self.algo.store.unpack_version(self.algo.name, self.algo.version)
 
-    replacements = {"hg19to38": {"11_gl000202_random": "GL000202.1"}}
-
-    @staticmethod
-    def do_liftover(listOfChromosomeIntervals, chain_file):
+    def do_liftover(self, listOfChromosomeIntervals, chain_file):
         """perform a lift over. Error messages are silently swallowed!"""
         tmp_input = tempfile.NamedTemporaryFile(mode="wb")
         tmp_output = tempfile.NamedTemporaryFile(mode="wb")
@@ -168,9 +171,8 @@ class LiftOver(object):
             max_len = max(len(row), max_len)
         tmp_input.write(b"\n")
         tmp_input.flush()  # it's magic ;)
-        chmod(file_path / "liftOver", 0o777)
         cmd = [
-            file_path / "liftOver",
+            self.algo.path / "liftOver",
             tmp_input.name,
             chain_file,
             tmp_output.name,

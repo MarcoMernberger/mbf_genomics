@@ -6,7 +6,7 @@ from mbf_genomes.example_genomes import get_Candidatus_carsonella_ruddii_pv
 from mbf_genomics import regions
 from mbf_genomics.annotator import Constant
 
-dummy_genome = get_Candidatus_carsonella_ruddii_pv()
+from .shared import get_genome, get_genome_chr_length, force_load
 
 @pytest.mark.usefixtures("new_pipegraph")
 class TestGenomicRegionConvertTests:
@@ -27,14 +27,14 @@ class TestGenomicRegionConvertTests:
             return res
 
         job = ppg.ParameterInvariant("shuParam", ("hello"))
-        a = regions.GenomicRegions("sharum", sample_data, [], dummy_genome)
+        a = regions.GenomicRegions("sharum", sample_data, [], get_genome_chr_length())
         a.add_annotator(Constant('Constant', 5))
         a.annotate()
         b = a.convert("a+1", convert, dependencies=[job])
-        b.load()
-        assert job in b.load().prerequisites
+        force_load(b.load())
+        assert job in b.load().lfg.prerequisites
         ppg.run_pipegraph()
-        assert len(a) == len(b)
+        assert len(a.df) == len(b.df)
         assert (a.df["start"] == b.df["start"] - 1).all()
         assert "column_that_will_disappear" in a.df.columns
         assert not ("column_that_will_disappear" in b.df.columns)
@@ -52,11 +52,11 @@ class TestGenomicRegionConvertTests:
         def convert(df):
             return None
 
-        a = regions.GenomicRegions("sharum", sample_data, [], dummy_genome)
+        a = regions.GenomicRegions("sharum", sample_data, [], get_genome_chr_length())
         b = a.convert("a+1", convert)
         with pytest.raises(ppg.RuntimeError) as e:
             ppg.run_pipegraph()
-            assert len(e.value.exceptions) == 1
+        assert len(e.value.exceptions) == 1
 
     def test_raises_on_non_genome(self):
         def sample_data():
@@ -73,14 +73,12 @@ class TestGenomicRegionConvertTests:
             res["start"] += 1
             return res
 
-        a = regions.GenomicRegions("sharum", sample_data, [], dummy_genome)
-        b = a.convert("a+1", convert, dummy_genome)
-
-        def inner():
-            c = a.convert("a+1b", convert, "hello")
+        genome = get_genome_chr_length()
+        a = regions.GenomicRegions("sharum", sample_data, [], genome)
+        b = a.convert("a+1", convert, genome)
 
         with pytest.raises(ValueError):
-            inner()
+            c = a.convert("a+1b", convert, "hello")
 
     def test_grow(self):
         def sample_data():
@@ -92,9 +90,9 @@ class TestGenomicRegionConvertTests:
                 }
             )
 
-        a = regions.GenomicRegions("sharum", sample_data, [], dummy_genome)
+        a = regions.GenomicRegions("sharum", sample_data, [], get_genome_chr_length())
         b = a.convert("agrown", regions.convert.grow(12))
-        b.load()
+        force_load(b.load())
         ppg.run_pipegraph()
         assert (b.df["start"] == [0, 100 - 12, 1000 - 12]).all()
         assert (b.df["stop"] == [24, 110 + 12, 1110 + 12]).all()
@@ -109,57 +107,28 @@ class TestGenomicRegionConvertTests:
                 ]
             )
 
-        a = regions.GenomicRegions("sharum", sample_data, [], dummy_genome)
+        a = regions.GenomicRegions("sharum", sample_data, [], get_genome_chr_length())
         b = a.convert("agrown", regions.convert.grow(50000), on_overlap="merge")
-        b.load()
+        force_load(b.load())
         ppg.run_pipegraph()
         assert (b.df["start"] == [7724885, 8236026]).all()
         assert (b.df["stop"] == [7841673, 8392008]).all()
 
     def test_promotorize(self):
-        genome = DummyGenome(
-            pd.DataFrame(
-                [
-                    {
-                        "stable_id": "fake1",
-                        "chr": "1",
-                        "strand": 1,
-                        "tss": 5000,
-                        "tes": 5500,
-                        "description": "bla",
-                    },
-                    {
-                        "stable_id": "fake2",
-                        "chr": "2",
-                        "strand": -1,
-                        "tss": 5400,
-                        "tes": 4900,
-                        "description": "bla",
-                    },
-                    {
-                        "stable_id": "fake3",
-                        "chr": "3",
-                        "strand": -1,
-                        "tss": 5400,
-                        "tes": 4900,
-                        "description": "bla",
-                    },
-                ]
-            )
-        )
-        g = genes.Genes(genome)
+       
+        g = genes.Genes(get_genome_chr_length)
         b = g.convert("b", regions.convert.promotorize(444))
         b.load()
         ppg.run_pipegraph()
         assert len(g) > 0
         assert len(g) == len(b)
         for ii in range(0, len(g)):
-            if g.df.get_value(ii, "strand") == 1:
-                assert b.df.get_value(ii, "start") == g.df.get_value(ii, "tss") - 444
-                assert b.df.get_value(ii, "stop") == g.df.get_value(ii, "tss")
+            if g.df.at(ii, "strand") == 1:
+                assert b.df.at[ii, "start"] == g.df.at[ii, "tss"] - 444
+                assert b.df.at[ii, "stop"] == g.df.at[ii, "tss"]
             else:
-                assert b.df.get_value(ii, "start") == g.df.get_value(ii, "tss")
-                assert b.df.get_value(ii, "stop") == g.df.get_value(ii, "tss") + 444
+                assert b.df.at[ii, "start"] == g.df.at[ii, "tss"]
+                assert b.df.at[ii, "stop"] == g.df.at[ii, "tss"] + 444
 
     def test_merge_connected(self):
         def sample_data():
@@ -171,9 +140,9 @@ class TestGenomicRegionConvertTests:
                 }
             )
 
-        a = regions.GenomicRegions("sharum", sample_data, [], dummy_genome)
+        a = regions.GenomicRegions("sharum", sample_data, [], get_genome_chr_length())
         b = a.convert("agrown", regions.convert.merge_connected())
-        b.load()
+        force_load(b.load())
         ppg.run_pipegraph()
         assert (b.df["start"] == [10, 102, 5, 6000]).all()
         assert (b.df["stop"] == [100, 1000, 5000, 6010]).all()
@@ -188,9 +157,9 @@ class TestGenomicRegionConvertTests:
                 }
             )
 
-        a = regions.GenomicRegions("sharum", sample_data, [], dummy_genome)
+        a = regions.GenomicRegions("sharum", sample_data, [], get_genome_chr_length())
         b = a.convert("agrown", regions.convert.merge_connected())
-        b.load()
+        force_load(b.load())
         ppg.run_pipegraph()
         assert (b.df["start"] == [27897200, 27898600, 0]).all()
         assert (b.df["stop"] == [27897300, 27898700, 100]).all()
@@ -205,9 +174,9 @@ class TestGenomicRegionConvertTests:
                 }
             )
 
-        a = regions.GenomicRegions("sharum", sample_data, [], dummy_genome)
+        a = regions.GenomicRegions("sharum", sample_data, [], get_genome_chr_length())
         b = a.convert("hg38", regions.convert.hg19_to_hg38())
-        b.load()
+        force_load(b.load())
         ppg.run_pipegraph()
         # made these with the ucsc web liftover utility
         # http://genome.ucsc.edu/cgi-bin/hgLiftOver
@@ -220,15 +189,36 @@ class TestGenomicRegionConvertTests:
                 {"chr": ["1", "2"], "start": [0, 0], "stop": [200, 99 * 3]}
             )
 
-        a = regions.GenomicRegions("sharum", sample_data, [], dummy_genome)
+        a = regions.GenomicRegions("sharum", sample_data, [], get_genome_chr_length())
         b = a.convert("ndiwo", regions.convert.windows(99, False))
         c = a.convert("ndiwo2", regions.convert.windows(99, True))
-        b.load()
-        c.load()
+        force_load(b.load())
+        force_load(c.load())
         ppg.run_pipegraph()
         assert (b.df["start"] == [0, 99, 99 * 2, 0, 99, 99 * 2]).all()
         assert (b.df["stop"] == [99, 99 * 2, 200, 99, 99 * 2, 99 * 3]).all()
         assert (c.df["start"] == [0, 99, 0, 99, 99 * 2]).all()
         assert (c.df["stop"] == [99, 99 * 2, 99, 99 * 2, 99 * 3]).all()
+
+@pytest.mark.usefixtures("new_pipegraph")
+class TestGenomicRegionSourceTest:
+    def test_manual_source(self):
+        def sample_data():
+            import random
+
+            start = random.randint(0, 10000)
+            stop = start + random.randint(1, 3000)
+            return pd.DataFrame(
+                {"chr": ["Chromosome"], "start": [start], "stop": [stop]}
+            )
+
+        genome = get_genome()
+        a = regions.GenomicRegions("sha", sample_data, [], genome)
+        b = regions.GenomicRegions("shb", sample_data, [], genome)
+        c = regions.GenomicRegions("shc", sample_data, [], genome)
+        all = [a, b, c]
+        source = regions.GenomicRegionsSource("mysource", all)
+        assert hasattr(source, "get_dependencies")
+        assert all == list(source)
 
 
