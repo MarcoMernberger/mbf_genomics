@@ -20,6 +20,8 @@ def get_genome(name=None):
             name, cache_dir=cache_dir, ignore_code_changes=True
         )
         g.download_genome()
+        #g.job_genes()
+        #g.job_transcripts()
         ppg_genome = g
         ppg.run_pipegraph()
         ppg.util.global_pipegraph = old_pipegraph

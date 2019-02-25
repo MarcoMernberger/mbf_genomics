@@ -8,7 +8,13 @@ import mbf_genomics.genes as genes
 from mbf_genomics.annotator import Constant
 from mbf_genomes import HardCodedGenome
 
-from .shared import get_genome, get_genome_chr_length, force_load
+from .shared import (
+    get_genome,
+    get_genome_chr_length,
+    force_load,
+    run_pipegraph,
+    RaisesDirectOrInsidePipegraph,
+)
 
 
 def DummyGenome(df_genes, df_transcripts=None):
@@ -41,13 +47,31 @@ def DummyGenome(df_genes, df_transcripts=None):
         df_transcripts = df_transcripts.set_index("transcript_stable_id")
     return HardCodedGenome("dummy", chr_lengths, df_genes, df_transcripts, None)
 
-
 @pytest.mark.usefixtures("new_pipegraph")
+class TestGenesLoadingPPGOnly:
+    def test_loading_from_genome_is_singletonic(self):
+        genome = get_genome()
+        genesA = genes.Genes(genome)
+        genesB = genes.Genes(genome)
+        assert genesA is genesB
+        filterA = genesA.filter("fa", lambda df: df.index[:10])
+        filterAa = genesA.filter("faa", lambda df: df.index[:10])
+        filterB = genesB.filter("fab", lambda df: df.index[:10])
+        assert not (filterA is genesA)
+        assert not (filterAa is filterA)
+        assert not (filterAa is filterB)
+        with pytest.raises(ValueError):  # can't have a different loading func
+            filterB = genesB.filter("fab", lambda df: df.index[:15])
+        force_load(filterA.load)
+        ppg.run_pipegraph()
+        assert len(filterA.df) == 10
+
+@pytest.mark.usefixtures("both_ppg_and_no_ppg")
 class TestGenesLoading:
     def test_basic_loading_from_genome(self):
         g = genes.Genes(get_genome())
         force_load(g.load())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(g.df) == 246
         assert (g.df["gene_stable_id"][:3] == ["CRP_001", "CRP_002", "CRP_003"]).all()
         assert g.df["gene_stable_id"].iloc[-1] == "CRP_182"
@@ -56,11 +80,9 @@ class TestGenesLoading:
         assert g.df["strand"].iloc[-1] == -1
 
     def test_alternative_loading_raises_on_non_df(self):
-        g = genes.Genes(get_genome_chr_length(), lambda: None, "myname")
-        force_load(g.load())
-
-        with pytest.raises(ValueError):
-            ppg.run_pipegraph()
+        with RaisesDirectOrInsidePipegraph(ValueError):
+            g = genes.Genes(get_genome_chr_length(), lambda: None, "myname")
+            force_load(g.load())
 
     def test_alternative_loading_raises_on_missing_column(self):
         df = pd.DataFrame(
@@ -97,21 +119,21 @@ class TestGenesLoading:
             df2 = df2.drop("tss", axis=1)
             g = genes.Genes(get_genome(), lambda: df2, name="sha")
             g.load()
-            ppg.run_pipegraph()
+            run_pipegraph()
 
         def inner_chr():
             df2 = df.copy()
             df2 = df2.drop("chr", axis=1)
             g = genes.Genes(get_genome(), lambda: df2, name="shu")
             g.load()
-            ppg.run_pipegraph()
+            run_pipegraph()
 
         def inner_tes():
             df2 = df.copy()
             df2 = df2.drop("tes", axis=1)
             g = genes.Genes(get_genome(), lambda: df2, name="shi")
             g.load()
-            ppg.run_pipegraph()
+            run_pipegraph()
 
         with pytest.raises(ValueError):
             inner_tss()
@@ -186,7 +208,7 @@ class TestGenesLoading:
         with pytest.raises(ValueError):
             g = genes.Genes(get_genome(), lambda: df, name="shu")
             force_load(g.load())
-            ppg.run_pipegraph()
+            run_pipegraph()
 
     def test_alternative_loading_raises_on_non_int_tss(self):
         df = pd.DataFrame(
@@ -221,7 +243,7 @@ class TestGenesLoading:
         with pytest.raises(ValueError):
             g = genes.Genes(get_genome(), lambda: df, name="shu")
             force_load(g.load())
-            ppg.run_pipegraph()
+            run_pipegraph()
 
     def test_alternative_loading_raises_on_non_int_tes(self):
         df = pd.DataFrame(
@@ -256,13 +278,13 @@ class TestGenesLoading:
         with pytest.raises(ValueError):
             g = genes.Genes(get_genome(), lambda: df, name="shu")
             force_load(g.load())
-            ppg.run_pipegraph()
+            run_pipegraph()
 
     def test_do_load_only_happens_once(self):
         df = pd.DataFrame(
             [
                 {
-                    "stable_id": "fake1",
+                    "gene_stable_id": "fake1",
                     "chr": "1",
                     "strand": 1,
                     "tss": 5000,
@@ -277,13 +299,14 @@ class TestGenesLoading:
             counter[0] += 1
             return df
 
-        g = genes.Genes(get_genome(), load, name="shu")
+        g = genes.Genes(get_genome_chr_length(), load, name="shu")
         if ppg.inside_ppg():
             assert counter[0] == 0
             g.load()
             assert counter[0] == 0
             g.load()
             assert counter[0] == 0
+            ppg.run_pipegraph()
         else:
             assert counter[0] == 1
             g.load()
@@ -323,7 +346,7 @@ class TestGenesLoading:
         g = genes.Genes(genome)
         filtered = g.filter("nogenes", lambda df: df["chr"] == "4")
         force_load(filtered.load())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(filtered.df) == 0
         assert "start" in filtered.df.columns
         assert "stop" in filtered.df.columns
@@ -368,20 +391,7 @@ class TestGenesLoading:
         filtered = g.filter("nogenes", lambda df: df["chr"] == "4")
         assert filtered.has_annotator(ca)
 
-    def test_loading_from_genome_is_singletonic(self):
-        genome = get_genome()
-        genesA = genes.Genes(genome)
-        genesB = genes.Genes(genome)
-        assert genesA is genesB
-        filterA = genesA.filter("fa", lambda df: df.index[:10])
-        filterAa = genesA.filter("faa", lambda df: df.index[:10])
-        filterB = genesB.filter("fab", lambda df: df.index[:10])
-        assert not (filterA is genesA)
-        assert not (filterAa is filterA)
-        assert not (filterAa is filterB)
-        with pytest.raises(ValueError):
-            filterB = genesB.filter("fab", lambda df: df.index[:10])
-
+    
     def test_filtering_returns_genes(self):
         g = genes.Genes(get_genome())
         on_chr_1 = g.filter("on_1", lambda df: df["chr"] == "1")
@@ -399,7 +409,7 @@ class TestGenesLoading:
         b = regions.GenomicRegions("sha", sample_data, [], genome)
         force_load(a.load())
         force_load(b.load())
-        ppg.run_pipegraph()
+        run_pipegraph()
 
         with pytest.raises(ValueError):
             a.overlap_genes(b)
@@ -451,7 +461,7 @@ class TestGenesLoading:
         force_load(on_chr_1.load())
         force_load(on_chr_2.load())
         force_load(one.load())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(on_chr_1.df) == 2
         assert len(on_chr_2.df) == 1
         assert len(one.df) == 1
@@ -505,7 +515,7 @@ class TestGenesLoading:
         g = genes.Genes(genome)
         tss = g.regions_tss()
         force_load(tss.load())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(tss.df) == 3
         assert (tss.df["start"] == [5000, 5400, 5400]).all()
         assert (tss.df["stop"] == tss.df["start"] + 1).all()
@@ -545,7 +555,7 @@ class TestGenesLoading:
         g = genes.Genes(genome)
         tes = g.regions_tes()
         force_load(tes.load())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(tes.df) == 2
         assert (tes.df["start"] == [4900, 4900]).all()
         assert (tes.df["stop"] == tes.df["start"] + 1).all()
@@ -605,7 +615,7 @@ class TestGenesLoading:
         g = genes.Genes(genome)
         exons = g.regions_exons_overlapping()
         force_load(exons.load())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert (exons.df["start"] == [3000, 3100, 3300, 3750, 4910, 5100, 4900]).all()
         assert (exons.df["stop"] == [3500, 4900, 3330, 4000, 5000, 5400, 5400]).all()
         assert (exons.df["chr"] == np.array(["1", "1", "1", "1", "1", "1", "2"])).all()
@@ -664,7 +674,7 @@ class TestGenesLoading:
         g = genes.Genes(genome)
         exons = g.regions_exons_merged()
         force_load(exons.load())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert (exons.df["start"] == [3000, 4910, 5100, 4900]).all()
         assert (exons.df["stop"] == [4900, 5000, 5400, 5400]).all()
         assert (exons.df["chr"] == ["1", "1", "1", "2"]).all()
@@ -720,7 +730,7 @@ class TestGenesLoading:
         g = genes.Genes(genome)
         introns = g.regions_introns()
         force_load(introns.load())
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert (introns.df["start"] == [3000, 3500, 4000, 5000]).all()
         assert (introns.df["stop"] == [3100, 3750, 4900, 5100]).all()
         # no intronic region on chr 2
@@ -763,7 +773,7 @@ class TestGenes:
         g = genes.Genes(genome)
         sample_filename = "genes.bed"
         g.write_bed(sample_filename)
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(g.df) > 0
         read = read_bed(g.result_dir / sample_filename)
         assert len(read) == len(g.df)
@@ -813,7 +823,7 @@ class TestGenes:
         )
         g = genes.Genes(genome)
         sample_filename = g.write_bed().job_id  # the jobs output filename
-        ppg.run_pipegraph()
+        run_pipegraph()
         assert len(g.df) > 0
         read = read_bed(sample_filename)
         assert len(read) == len(g.df)
@@ -835,5 +845,5 @@ class TestGenes:
     # g.do_load()
     # row_names = g.df.row_names
     # g.annotate()
-    # ppg.run_pipegraph()
+    # run_pipegraph()
     # self.assertTrue((row_names == g.df.row_names).all())

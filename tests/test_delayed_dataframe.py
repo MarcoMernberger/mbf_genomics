@@ -379,6 +379,23 @@ class Test_DelayedDataFrameDirect:
         assert counts["A"] == 2  # no two recalcs
         assert counts["B"] == 2  # no two recalcs
 
+    def test_filtering_result_dir(self):
+        counts = collections.Counter()
+
+        class A(Annotator):
+            cache_name = "A"
+            columns = ["aa"]
+
+            def calc(self, df):
+                counts["A"] += 1
+                return pd.DataFrame({self.columns[0]: "a"}, index=df.index)
+
+        a = DelayedDataFrame(
+            "shu", lambda: pd.DataFrame({"A": [1, 2], "B": ["c", "d"]})
+        )
+        b = a.filter("sha", lambda df: df["A"] == 1, result_dir="shu2")
+        assert b.result_dir.absolute() == Path("shu2").absolute()
+
     def test_filtering_on_annotator(self):
         class A(Annotator):
             cache_name = "A"
@@ -535,6 +552,19 @@ class Test_DelayedDataFramePPG:
         assert Path(fn.filenames[0]).exists()
         assert_frame_equal(pd.read_csv(fn.filenames[0], sep="\t"), test_df)
 
+    def test_write_mixed_manglers(self):
+        test_df = pd.DataFrame({"A": [1, 2]})
+
+        def load():
+            return test_df
+
+        a = DelayedDataFrame("shu", load)
+        fn = a.write(mangler_function=lambda df:df)
+        def b(df):
+            return df.head()
+        with pytest.raises(ppg.JobContractError):
+            fn2 = a.write(mangler_function=b)
+        
     def test_annotator_basic(self):
         a = DelayedDataFrame(
             "shu", lambda: pd.DataFrame({"A": [1, 2], "B": ["c", "d"]})

@@ -42,6 +42,14 @@ class Genes(GenomicRegions):
         vid=None,
     ):
         if hasattr(self, "_already_inited"):
+            if (
+                alternative_load_func is not None
+                and alternative_load_func != self.genes_load_func
+            ):
+                raise ValueError(
+                    "Trying to define Genes(%s) twice with different loading funcs"
+                    % self.name
+                )
             pass
         else:
             if name is None:
@@ -159,8 +167,6 @@ class Genes(GenomicRegions):
                     "%s not in dataframe returned by GenomicRegion.loading_function %s %s - it did return %s"
                     % (col, func_filename, func_line_no, df.columns)
                 )
-        if (df["start"] > df["stop"]).any():
-            raise ValueError("Genes.loading_function returned a negative interval")
         allowed_chromosomes = set(self.genome.get_chromosome_lengths().keys())
         if len(df):
             for chr in df["chr"]:
@@ -191,6 +197,9 @@ class Genes(GenomicRegions):
             df = df.assign(
                 start=np.array([], dtype=np.int32), stop=np.array([], dtype=np.int32)
             )
+
+        if (df["start"] > df["stop"]).any():
+            raise ValueError("Genes.loading_function returned a negative interval")
         self.df = df.sort_values(["chr", "start"], ascending=[True, True]).reset_index(
             drop=True
         )  # since we don't call handle_overlap
@@ -314,7 +323,6 @@ class Genes(GenomicRegions):
             on_overlap="ignore",
         )
 
-
     def _regions_exons(self):
         def load():
             res = {
@@ -340,6 +348,7 @@ class Genes(GenomicRegions):
                     res["transcript_stable_id"].append(transcript_stable_id)
                     res["gene_stable_id"].append(transcript_row["gene_stable_id"])
             return pd.DataFrame(res)
+
         return load
 
     @lazy_method

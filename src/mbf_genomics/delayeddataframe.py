@@ -133,6 +133,12 @@ class DelayedDataFrame(object):
                     self.__class__.__name__ + "_" + new_name + "_parent", self.name
                 )
             )
+            dependencies.append(
+                ppg.FunctionInvariant(
+                    self.__class__.__name__ + "_" + new_name + '_filter', df_filter_function
+                )
+            )
+
             dependencies.append(self.load())
             for anno in annotators:
                 self += anno
@@ -142,7 +148,7 @@ class DelayedDataFrame(object):
             for anno in annotators:
                 self += anno
 
-        result = self._new_for_filtering(new_name, load, dependencies)
+        result = self._new_for_filtering(new_name, load, dependencies, **kwargs)
         result.parent = self
         result.filter_annos = annotators
         for anno in self.annotators.values():
@@ -173,7 +179,7 @@ class DelayedDataFrame(object):
         return result
 
     def get_table_filename(self):
-        return self.result_dir/( self.name + ".tsv")
+        return self.result_dir / (self.name + ".tsv")
 
     def mangle_df_for_write(self, df):
         return df
@@ -183,7 +189,9 @@ class DelayedDataFrame(object):
         To sort, filter, remove columns, etc before output,
         pass in a mangler_function (takes df, returns df)
         """
-        output_filename = self.pathify(output_filename, self.get_table_filename().absolute())
+        output_filename = self.pathify(
+            output_filename, self.get_table_filename().absolute()
+        )
 
         def write(output_filename):
             if mangler_function:
@@ -198,13 +206,17 @@ class DelayedDataFrame(object):
             else:
                 df.to_csv(output_filename, sep="\t", index=False, encoding="utf-8")
 
-        if output_filename not in self.mangler_dict:
-            self.mangler_dict[output_filename] = None
+        # if output_filename not in self.mangler_dict:
+        # self.mangler_dict[output_filename] = mangler_function
+        # else:
+        # if ppg.util.is_same_function(self.mangler_dict[output_filename] != mangler_function):
+        # raise ValueErr
+
         if self.load_strategy.build_deps:
             deps = [
                 self.annotate(),
                 ppg.FunctionInvariant(
-                    str(output_filename) + "_mangler", self.mangler_dict[output_filename]
+                    str(output_filename) + "_mangler", mangler_function
                 ),
             ]
         else:
@@ -213,6 +225,7 @@ class DelayedDataFrame(object):
 
     def plot(self, output_filename, plot_func, calc_func=None):
         output_filename = self.pathify(output_filename)
+
         def do_plot(output_filename=output_filename):
             df = self.df
             if calc_func is not None:
@@ -225,7 +238,10 @@ class DelayedDataFrame(object):
         if self.load_strategy.build_deps:
             deps = [
                 self.annotate(),
-                ppg.FunctionInvariant(output_filename.with_name(output_filename.name +  "_plot_func"), plot_func),
+                ppg.FunctionInvariant(
+                    output_filename.with_name(output_filename.name + "_plot_func"),
+                    plot_func,
+                ),
             ]
         else:
             deps = []
@@ -238,7 +254,6 @@ class DelayedDataFrame(object):
         if not output_filename.is_absolute():
             output_filename = self.result_dir / output_filename
         return output_filename.absolute()
-
 
 
 class Load_Direct:
