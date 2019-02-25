@@ -142,9 +142,7 @@ class DelayedDataFrame(object):
             for anno in annotators:
                 self += anno
 
-        print('dependencies are', dependencies)
         result = self._new_for_filtering(new_name, load, dependencies)
-        print(result.load_strategy.deps)
         result.parent = self
         result.filter_annos = annotators
         for anno in self.annotators.values():
@@ -192,7 +190,7 @@ class DelayedDataFrame(object):
                 df = mangler_function(self.df.copy())
             else:
                 df = self.mangle_df_for_write(self.df)
-            if output_filename.endswith(".xls"):
+            if str(output_filename).endswith(".xls"):
                 try:
                     df.to_excel(output_filename, index=False)
                 except (ValueError):
@@ -206,7 +204,7 @@ class DelayedDataFrame(object):
             deps = [
                 self.annotate(),
                 ppg.FunctionInvariant(
-                    output_filename + "_mangler", self.mangler_dict[output_filename]
+                    str(output_filename) + "_mangler", self.mangler_dict[output_filename]
                 ),
             ]
         else:

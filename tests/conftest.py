@@ -11,9 +11,9 @@ import os
 import pytest
 import pypipegraph as ppg
 from pathlib import Path
-from pypipegraph.tests.fixtures import (
-    new_pipegraph,
-    pytest_runtest_makereport,
+from pypipegraph.tests.fixtures import (  # noqa:F401
+    new_pipegraph,  # noqa:F401
+    pytest_runtest_makereport,  # noqa:F401
 )  # noqa:F401
 
 # from mbf_externals.tests.fixtures import local_store, global_store  # noqa:F401
@@ -181,7 +181,7 @@ def both_ppg_and_no_ppg(request):
 
 
 @pytest.fixture
-def clear_annotators(_request):
+def clear_annotators(request):
     """Clear the annotator singleton instance cache
     which is only used if no ppg is in play"""
     import mbf_genomics.annotator

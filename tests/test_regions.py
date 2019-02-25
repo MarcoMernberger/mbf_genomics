@@ -8,14 +8,11 @@ import pypipegraph as ppg
 import pandas as pd
 from pathlib import Path
 import dppd
-import dppd_plotnine
-import inspect
-import sys
+import dppd_plotnine  # noqa:F401
 
 
 import mbf_genomics.regions as regions
 from mbf_genomics.annotator import Constant, Annotator
-from mbf_genomes.filebased import InteractiveFileBasedGenome
 
 from .shared import (
     get_genome,
@@ -24,7 +21,7 @@ from .shared import (
     assert_image_equal,
     inside_ppg,
     run_pipegraph,
-    RaisesDirectOrInsidePipegraph
+    RaisesDirectOrInsidePipegraph,
 )
 
 dp, X = dppd.dppd()
@@ -46,9 +43,9 @@ class TestGenomicRegionsLoadingPPGOnly:
         assert job in load_job.lfg.prerequisites
 
     def test_depenencies_must_be_jobs(self):
-        job = ppg.ParameterInvariant("shu", (None,))
+        ppg.ParameterInvariant("shu", (None,))
         with pytest.raises(ValueError):
-            a = regions.GenomicRegions("shu", lambda: None, ["shu"], get_genome())
+            regions.GenomicRegions("shu", lambda: None, ["shu"], get_genome())
 
 
 @pytest.mark.usefixtures("both_ppg_and_no_ppg")
@@ -67,13 +64,13 @@ class TestGenomicRegionsLoading:
                 {"chr": ["Chromosome"], "start": [1000], "stop": [1100]}
             )
 
-        a = regions.GenomicRegions("shu", sample_data, [], get_genome())
+        regions.GenomicRegions("shu", sample_data, [], get_genome())
 
         if inside_ppg():
             with pytest.raises(ValueError):
-                b = regions.GenomicRegions("shu", sample_data, [], get_genome())
+                regions.GenomicRegions("shu", sample_data, [], get_genome())
             both_ppg_and_no_ppg.new_pipegraph()
-            c = regions.GenomicRegions(
+            regions.GenomicRegions(
                 "shu", sample_data, [], get_genome()
             )  # should not raise
 
@@ -98,7 +95,7 @@ class TestGenomicRegionsLoading:
 
     def test_raises_on_invalid_on_overlap(self):
         def inner():
-            a = regions.GenomicRegions(
+            regions.GenomicRegions(
                 "shu",
                 lambda: None,
                 [],
@@ -384,7 +381,7 @@ class TestGenomicRegionsLoading:
             )
 
         def merge_function(subset_df):
-            row = subset_df.iloc[0]
+            row = subset_df.iloc[0][:]
             row["does not exist"] = row["pick_me"]
             return row
 
@@ -633,7 +630,9 @@ class TestGenomicRegionsLoading:
                 }
             )
 
-        with RaisesDirectOrInsidePipegraph(ValueError, "All starts need to be positive"):
+        with RaisesDirectOrInsidePipegraph(
+            ValueError, "All starts need to be positive"
+        ):
             a = regions.GenomicRegions(
                 "shu", sample_data, [], get_genome_chr_length(), on_overlap="merge"
             )
@@ -726,9 +725,9 @@ class TestGenomicRegionsLoading:
         fn = "results/GenomicRegions/shu/shu.png"
         if inside_ppg():
             assert isinstance(pj, ppg.FileGeneratingJob)
-            assert pj.filenames[0] == fn
+            assert pj.filenames[0] == str(Path(fn).absolute())
         else:
-            assert str(pj) == fn
+            assert str(pj) == str(Path(fn).absolute())
         run_pipegraph()
         assert_image_equal(fn)
 
@@ -829,21 +828,21 @@ class TestGenomicRegionsAnnotation:
         self.setUp()
         ca = Constant("Constant", 5)
         assert not self.a.has_annotator(ca)
-        anno_job = self.a.add_annotator(ca)
+        self.a.add_annotator(ca)
         assert self.a.has_annotator(ca)
 
     def test_annotator_by_name(self):
         self.setUp()
         ca = Constant("Constant", 5)
         assert not self.a.has_annotator(ca)
-        anno_job = self.a.add_annotator(ca)
+        self.a.add_annotator(ca)
         assert ca == self.a.get_annotator(ca.columns[0])
 
     def test_anno_jobs_add_columns(self):
         self.setUp()
         ca = Constant("Constant", 5)
         assert len(self.a.annotators) == 1
-        anno_job = self.a.add_annotator(ca)
+        self.a.add_annotator(ca)
         force_load(self.a.annotate(), "test_anno_jobs_add_columns")
         run_pipegraph()
         assert ca.columns[0] in self.a.df.columns
@@ -862,14 +861,13 @@ class TestGenomicRegionsWriting:
             )
 
         self.a = regions.GenomicRegions("shu", sample_data, [], get_genome_chr_length())
-        self.sample_filename = "sample.dat"
+        self.sample_filename = str(Path("sample.dat").absolute())
         try:
             os.unlink(self.sample_filename)
         except OSError:
             pass
 
     def test_write_bed(self):
-        # TODO: rewrite with non-fileformats?
         self.setUp()
         from mbf_fileformats.bed import read_bed
 
@@ -906,7 +904,7 @@ class TestGenomicRegionsWriting:
 
     def test_write_without_filename(self):
         self.setUp()
-        self.a.result_dir = ""
+        self.a.result_dir = Path("")
         self.a.write()
         run_pipegraph()
         assert os.path.exists("shu.tsv")
@@ -933,9 +931,9 @@ class TestGenomicRegionsWriting:
         fn = "results/GenomicRegions/shu/shu.png"
         if inside_ppg():
             assert isinstance(pj, ppg.FileGeneratingJob)
-            assert pj.filenames[0] == fn
+            assert pj.filenames[0] == str(Path(fn).absolute())
         else:
-            assert str(pj) == fn
+            assert str(pj) == str(Path(fn).absolute())
         run_pipegraph()
         assert_image_equal(fn)
 
@@ -1270,7 +1268,6 @@ class TestInterval:
         force_load(self.a.build_intervals())
         run_pipegraph()
         g = self.a.has_overlapping_generator()
-        res = []
         assert g("2", 105, 106)
         # querying the same start again is ok
         assert g("2", 105, 108)
@@ -1588,7 +1585,6 @@ class TestSetOperationsOnGenomicRegions:
         ca1 = Constant("one", 1)
         b = [(80, 120), (600, 700)]
         ca2 = Constant("two", 2)
-        should = [(10, 120), (400, 450), (600, 700)]
         a = self.sample_to_gr(a, "a")
         a.add_annotator(ca1)
         b = self.sample_to_gr(b, "b")
@@ -1608,7 +1604,6 @@ class TestSetOperationsOnGenomicRegions:
         ca1 = Constant("one", 1)
         b = [(80, 120), (600, 700)]
         ca2 = Constant("two", 2)
-        should = [(10, 120), (400, 450), (600, 700)]
         a = self.sample_to_gr(a, "a")
         a.add_annotator(ca1)
         b = self.sample_to_gr(b, "b")
@@ -1676,7 +1671,6 @@ class TestSetOperationsOnGenomicRegions:
         ca1 = Constant("one", 1)
         b = [(80, 120), (600, 700)]
         ca2 = Constant("two", 2)
-        should = [(10, 120), (400, 450), (600, 700)]
         a = self.sample_to_gr(a, "a")
         a.add_annotator(ca1)
         b = self.sample_to_gr(b, "b")
@@ -1708,7 +1702,6 @@ class TestSetOperationsOnGenomicRegions:
         ca1 = Constant("one", 1)
         b = [(80, 120), (600, 700)]
         ca2 = Constant("two", 2)
-        should = [(10, 120), (400, 450), (600, 700)]
         a = self.sample_to_gr(a, "a")
         a.add_annotator(ca1)
         b = self.sample_to_gr(b, "b")
@@ -1963,7 +1956,7 @@ class TestSetOperationsOnGenomicRegions:
             a.union("shu", b)
 
         def inner_intersection():
-            c = a.intersection("sha", b)
+            a.intersection("sha", b)
 
         def inner_difference():
             a.difference("shi", b)

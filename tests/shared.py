@@ -1,3 +1,4 @@
+import pytest
 import pypipegraph as ppg
 import inspect
 import sys

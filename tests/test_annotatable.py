@@ -407,7 +407,7 @@ class Test_FromOldGenomics:
         a = DummyAnnotatable("A")
         anno = FixedAnnotator("shu", ("h", "i", "j", "z"))
         a.add_annotator(anno)
-        a.write("shu.xls")
+        a.write(Path("shu.xls").absolute())
         ppg.run_pipegraph()
         df = pd.read_excel("shu.xls")
         assert (df == a.df).all().all()

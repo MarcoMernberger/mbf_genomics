@@ -20,6 +20,7 @@ from .annotators import SummitMiddle
 from mbf_genomes.intervals import (
     merge_intervals,
     merge_intervals_with_callback,
+    merge_identical,
     get_overlapping_interval_indices,
 )
 
@@ -106,7 +107,7 @@ class GenomicRegions(DelayedDataFrame):
                 % (on_overlap, allowed_overlap_modes)
             )
         if on_overlap == "merge_identical":
-            on_overlap = ("merge", _merge_identical)
+            on_overlap = ("merge", merge_identical)
 
         self.name = name
         self.gr_loading_function = loading_function

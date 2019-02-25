@@ -44,6 +44,8 @@ def promotorize(basepairs=1250):
         res["start"][forward] -= basepairs
         res["start"][res["start"] < 0] = 0
         res["stop"][~forward] += basepairs
+        res['strand'] = df['strand']
+        res['gene_stable_id'] = df['gene_stable_id']
         return pd.DataFrame(res)
 
     return do_promotorize, [], basepairs

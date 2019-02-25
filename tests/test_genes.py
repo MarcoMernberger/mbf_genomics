@@ -6,20 +6,14 @@ from mbf_fileformats.bed import read_bed
 import mbf_genomics.regions as regions
 import mbf_genomics.genes as genes
 from mbf_genomics.annotator import Constant
-from mbf_genomes import TestingGenome
+from mbf_genomes import HardCodedGenome
 
 from .shared import get_genome, get_genome_chr_length, force_load
 
 
 def DummyGenome(df_genes, df_transcripts=None):
-    chr_lengths = {
-            "1": 100_000,
-            "2": 200_000,
-            "3": 300_000,
-            "4": 400_000,
-            "5": 500_000,
-        }
-    
+    chr_lengths = {"1": 100_000, "2": 200_000, "3": 300_000, "4": 400_000, "5": 500_000}
+
     df_genes = df_genes.rename(columns={"stable_id": "gene_stable_id"})
     if not "start" in df_genes.columns:
         starts = []
@@ -34,8 +28,8 @@ def DummyGenome(df_genes, df_transcripts=None):
         df_genes = df_genes.assign(start=starts, stop=stops)
     if not "biotype" in df_genes.columns:
         df_genes = df_genes.assign(biotype="protein_coding")
-    df_genes = df_genes.sort_values(['chr', 'start'])
-    df_genes = df_genes.set_index('gene_stable_id')
+    df_genes = df_genes.sort_values(["chr", "start"])
+    df_genes = df_genes.set_index("gene_stable_id")
     if df_transcripts is not None:
         if not "biotype" in df_transcripts.columns:
             df_transcripts = df_transcripts.assign(biotype="protein_coding")
@@ -44,14 +38,9 @@ def DummyGenome(df_genes, df_transcripts=None):
                 df_transcripts = df_transcripts.assign(
                     exons=[(x[0], x[1]) for x in df_transcripts["exons"]]
                 )
-        df_transcripts = df_transcripts.set_index('transcript_stable_id')
-    return TestingGenome(
-        'dummy',
-        chr_lengths,
-        df_genes,
-        df_transcripts,
-        None,
-    )
+        df_transcripts = df_transcripts.set_index("transcript_stable_id")
+    return HardCodedGenome("dummy", chr_lengths, df_genes, df_transcripts, None)
+
 
 @pytest.mark.usefixtures("new_pipegraph")
 class TestGenesLoading:
@@ -62,8 +51,8 @@ class TestGenesLoading:
         assert len(g.df) == 246
         assert (g.df["gene_stable_id"][:3] == ["CRP_001", "CRP_002", "CRP_003"]).all()
         assert g.df["gene_stable_id"].iloc[-1] == "CRP_182"
-        assert g.df["start"].iloc[-1] == 158649 -1
-        assert g.df["stop"].iloc[-1] == 159662
+        assert g.df["start"].iloc[-1] == 158_649 - 1
+        assert g.df["stop"].iloc[-1] == 159_662
         assert g.df["strand"].iloc[-1] == -1
 
     def test_alternative_loading_raises_on_non_df(self):
@@ -162,7 +151,7 @@ class TestGenesLoading:
         )
 
         with pytest.raises(ValueError):
-            g = genes.Genes(get_genome(), lambda: df)
+            genes.Genes(get_genome(), lambda: df)
 
     def test_alternative_loading_raises_on_invalid_chromosome(self):
         df = pd.DataFrame(
@@ -279,7 +268,7 @@ class TestGenesLoading:
                     "tss": 5000,
                     "tes": 5500,
                     "description": "bla",
-                },
+                }
             ]
         )
         counter = [0]
@@ -294,7 +283,7 @@ class TestGenesLoading:
             g.load()
             assert counter[0] == 0
             g.load()
-            assert counter[0] == 0 
+            assert counter[0] == 0
         else:
             assert counter[0] == 1
             g.load()
@@ -403,7 +392,9 @@ class TestGenesLoading:
         a = genes.Genes(genome)
 
         def sample_data():
-            return pd.DataFrame({"chr": ["Chromosome"], "start": [1000], "stop": [1100]})
+            return pd.DataFrame(
+                {"chr": ["Chromosome"], "start": [1000], "stop": [1100]}
+            )
 
         b = regions.GenomicRegions("sha", sample_data, [], genome)
         force_load(a.load())
@@ -734,8 +725,6 @@ class TestGenesLoading:
         assert (introns.df["stop"] == [3100, 3750, 4900, 5100]).all()
         # no intronic region on chr 2
         assert (introns.df["chr"] == ["1", "1", "1", "1"]).all()
-
-
 
 
 @pytest.mark.usefixtures("new_pipegraph")

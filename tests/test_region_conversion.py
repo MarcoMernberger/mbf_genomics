@@ -1,12 +1,12 @@
 import pytest
 import pandas as pd
 import pypipegraph as ppg
-from mbf_genomes.example_genomes import get_Candidatus_carsonella_ruddii_pv
 
-from mbf_genomics import regions
+from mbf_genomics import regions, genes
 from mbf_genomics.annotator import Constant
 
 from .shared import get_genome, get_genome_chr_length, force_load
+
 
 @pytest.mark.usefixtures("new_pipegraph")
 class TestGenomicRegionConvertTests:
@@ -28,7 +28,7 @@ class TestGenomicRegionConvertTests:
 
         job = ppg.ParameterInvariant("shuParam", ("hello"))
         a = regions.GenomicRegions("sharum", sample_data, [], get_genome_chr_length())
-        a.add_annotator(Constant('Constant', 5))
+        a.add_annotator(Constant("Constant", 5))
         a.annotate()
         b = a.convert("a+1", convert, dependencies=[job])
         force_load(b.load())
@@ -53,7 +53,7 @@ class TestGenomicRegionConvertTests:
             return None
 
         a = regions.GenomicRegions("sharum", sample_data, [], get_genome_chr_length())
-        b = a.convert("a+1", convert)
+        a.convert("a+1", convert)
         with pytest.raises(ppg.RuntimeError) as e:
             ppg.run_pipegraph()
         assert len(e.value.exceptions) == 1
@@ -75,10 +75,10 @@ class TestGenomicRegionConvertTests:
 
         genome = get_genome_chr_length()
         a = regions.GenomicRegions("sharum", sample_data, [], genome)
-        b = a.convert("a+1", convert, genome)
+        a.convert("a+1", convert, genome)
 
         with pytest.raises(ValueError):
-            c = a.convert("a+1b", convert, "hello")
+            a.convert("a+1b", convert, "hello")
 
     def test_grow(self):
         def sample_data():
@@ -115,20 +115,26 @@ class TestGenomicRegionConvertTests:
         assert (b.df["stop"] == [7841673, 8392008]).all()
 
     def test_promotorize(self):
-       
-        g = genes.Genes(get_genome_chr_length)
-        b = g.convert("b", regions.convert.promotorize(444))
-        b.load()
+
+        g = genes.Genes(get_genome())
+        b = g.convert("b", regions.convert.promotorize(444), on_overlap="ignore")
+        force_load(b.load())
+        force_load(b.load())
         ppg.run_pipegraph()
-        assert len(g) > 0
-        assert len(g) == len(b)
-        for ii in range(0, len(g)):
-            if g.df.at(ii, "strand") == 1:
-                assert b.df.at[ii, "start"] == g.df.at[ii, "tss"] - 444
-                assert b.df.at[ii, "stop"] == g.df.at[ii, "tss"]
+        assert len(g.df) > 0
+        assert len(g.df) == len(b.df)
+        assert "strand" in b.df.columns
+        # we have to go by index - the order might change
+        b_df = b.df.set_index("gene_stable_id")
+        g_df = g.df.set_index("gene_stable_id")
+        assert set(b_df.index) == set(g_df.index)
+        for ii in b_df.index:
+            if g_df.at[ii, "strand"] == 1:
+                assert b_df.at[ii, "start"] == max(0, g_df.at[ii, "tss"] - 444)
+                assert b_df.at[ii, "stop"] == max(0, g_df.at[ii, "tss"])
             else:
-                assert b.df.at[ii, "start"] == g.df.at[ii, "tss"]
-                assert b.df.at[ii, "stop"] == g.df.at[ii, "tss"] + 444
+                assert b_df.at[ii, "start"] == max(0, g_df.at[ii, "tss"])
+                assert b_df.at[ii, "stop"] == max(0, g_df.at[ii, "tss"] + 444)
 
     def test_merge_connected(self):
         def sample_data():
@@ -199,26 +205,3 @@ class TestGenomicRegionConvertTests:
         assert (b.df["stop"] == [99, 99 * 2, 200, 99, 99 * 2, 99 * 3]).all()
         assert (c.df["start"] == [0, 99, 0, 99, 99 * 2]).all()
         assert (c.df["stop"] == [99, 99 * 2, 99, 99 * 2, 99 * 3]).all()
-
-@pytest.mark.usefixtures("new_pipegraph")
-class TestGenomicRegionSourceTest:
-    def test_manual_source(self):
-        def sample_data():
-            import random
-
-            start = random.randint(0, 10000)
-            stop = start + random.randint(1, 3000)
-            return pd.DataFrame(
-                {"chr": ["Chromosome"], "start": [start], "stop": [stop]}
-            )
-
-        genome = get_genome()
-        a = regions.GenomicRegions("sha", sample_data, [], genome)
-        b = regions.GenomicRegions("shb", sample_data, [], genome)
-        c = regions.GenomicRegions("shc", sample_data, [], genome)
-        all = [a, b, c]
-        source = regions.GenomicRegionsSource("mysource", all)
-        assert hasattr(source, "get_dependencies")
-        assert all == list(source)
-
-

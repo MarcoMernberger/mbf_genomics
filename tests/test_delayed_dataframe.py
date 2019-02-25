@@ -48,7 +48,7 @@ class Test_DelayedDataFrameDirect:
         assert_frame_equal(a.df, test_df)
         assert a.non_annotator_columns == "A"
         fn = a.write()
-        assert Path("sha") in fn.parents
+        assert "/sha" in str(fn.parent)
         assert Path(fn).exists()
         assert_frame_equal(pd.read_csv(fn, sep="\t"), test_df)
 
@@ -107,11 +107,6 @@ class Test_DelayedDataFrameDirect:
         assert hash(a)
         assert a.name in str(a)
         assert a.name in repr(a)
-        assert len(a) == 2
-        assert bool(a)
-        b = DelayedDataFrame("shb", lambda: pd.DataFrame({}))
-        assert not bool(b)
-        assert len(b) == 0
 
     def test_annotator(self):
         a = DelayedDataFrame(
