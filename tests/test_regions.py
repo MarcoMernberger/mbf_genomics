@@ -23,50 +23,12 @@ from .shared import (
     force_load,
     assert_image_equal,
     inside_ppg,
+    run_pipegraph,
+    RaisesDirectOrInsidePipegraph
 )
 
 dp, X = dppd.dppd()
 data_path = Path(__file__).parent / "sample_data"
-
-
-def run_pipegraph():
-    if inside_ppg():
-        ppg.run_pipegraph()
-    else:
-        pass
-
-
-class RaiseDirectOrInsidePipegraph(object):
-    def __init__(self, expected_exception, search_message=None):
-        self.expected_exception = expected_exception
-        self.message = "DID NOT RAISE {}".format(expected_exception)
-        self.search_message = search_message
-        self.excinfo = None
-
-    def __enter__(self):
-        import _pytest
-
-        self.excinfo = object.__new__(_pytest._code.ExceptionInfo)
-        return self.excinfo
-
-    def __exit__(self, *tp):
-        from _pytest.outcomes import fail
-
-        if inside_ppg():
-            with pytest.raises(ppg.RuntimeError) as e:
-                run_pipegraph()
-            assert isinstance(e.value.exceptions[0], self.expected_exception)
-            if self.search_message:
-                assert self.search_message in str(e.value.exceptions[0])
-        else:
-            __tracebackhide__ = True
-            if tp[0] is None:
-                fail(self.message)
-            self.excinfo.__init__(tp)
-            suppress_exception = issubclass(self.excinfo.type, self.expected_exception)
-            if sys.version_info[0] == 2 and suppress_exception:
-                sys.exc_clear()
-            return suppress_exception
 
 
 @pytest.mark.usefixtures("new_pipegraph")
@@ -90,7 +52,7 @@ class TestGenomicRegionsLoadingPPGOnly:
 
 
 @pytest.mark.usefixtures("both_ppg_and_no_ppg")
-class TestGenomicRegionsLoadingTests:
+class TestGenomicRegionsLoading:
     def tearDown(self):
         import shutil
 
@@ -167,7 +129,7 @@ class TestGenomicRegionsLoadingTests:
         def sample_data():
             return pd.DataFrame({"chr": "1", "stop": [1100]})
 
-        with RaiseDirectOrInsidePipegraph(ValueError):
+        with RaisesDirectOrInsidePipegraph(ValueError):
             a = regions.GenomicRegions("sha", sample_data, [], get_genome())
             force_load(a.load)
 
@@ -175,7 +137,7 @@ class TestGenomicRegionsLoadingTests:
         def sample_data():
             return pd.DataFrame({"start": [1000], "stop": [1100]})
 
-        with RaiseDirectOrInsidePipegraph(ValueError):
+        with RaisesDirectOrInsidePipegraph(ValueError):
             a = regions.GenomicRegions("sha", sample_data, [], get_genome())
             force_load(a.load)
 
@@ -183,7 +145,7 @@ class TestGenomicRegionsLoadingTests:
         def sample_data():
             return pd.DataFrame({"chr": "Chromosome", "start": [1200]})
 
-        with RaiseDirectOrInsidePipegraph(ValueError):
+        with RaisesDirectOrInsidePipegraph(ValueError):
             a = regions.GenomicRegions("sha", sample_data, [], get_genome())
             force_load(a.load)
 
@@ -191,7 +153,7 @@ class TestGenomicRegionsLoadingTests:
         def sample_data():
             return pd.DataFrame({"chr": ["1b"], "start": [1200], "stop": [1232]})
 
-        with RaiseDirectOrInsidePipegraph(ValueError):
+        with RaisesDirectOrInsidePipegraph(ValueError):
             a = regions.GenomicRegions("sharum", sample_data, [], get_genome())
             force_load(a.load)
 
@@ -201,7 +163,7 @@ class TestGenomicRegionsLoadingTests:
                 {"chr": ["Chromosome"], "start": ["shu"], "stop": [1232]}
             )
 
-        with RaiseDirectOrInsidePipegraph(ValueError):
+        with RaisesDirectOrInsidePipegraph(ValueError):
             a = regions.GenomicRegions("sharum", sample_data, [], get_genome())
             force_load(a.load)
 
@@ -209,7 +171,7 @@ class TestGenomicRegionsLoadingTests:
         def sample_data():
             return pd.DataFrame({"chr": ["Chromosome"], "start": [2], "stop": [20.0]})
 
-        with RaiseDirectOrInsidePipegraph(ValueError):
+        with RaisesDirectOrInsidePipegraph(ValueError):
             a = regions.GenomicRegions("sharum", sample_data, [], get_genome())
             force_load(a.load)
 
@@ -217,7 +179,7 @@ class TestGenomicRegionsLoadingTests:
         def sample_data():
             return pd.DataFrame({"chr": [1], "start": [2], "stop": [20]})
 
-        with RaiseDirectOrInsidePipegraph(ValueError):
+        with RaisesDirectOrInsidePipegraph(ValueError):
             a = regions.GenomicRegions("sharum", sample_data, [], get_genome())
             force_load(a.load)
 
@@ -225,7 +187,7 @@ class TestGenomicRegionsLoadingTests:
         def sample_data():
             return None
 
-        with RaiseDirectOrInsidePipegraph(ValueError):
+        with RaisesDirectOrInsidePipegraph(ValueError):
             a = regions.GenomicRegions("sharum", sample_data, [], get_genome())
             force_load(a.load)
 
@@ -239,7 +201,7 @@ class TestGenomicRegionsLoadingTests:
                 }
             )
 
-        with RaiseDirectOrInsidePipegraph(ValueError):
+        with RaisesDirectOrInsidePipegraph(ValueError):
 
             a = regions.GenomicRegions(
                 "sha", sample_data, [], get_genome(), on_overlap="raise"
@@ -256,7 +218,7 @@ class TestGenomicRegionsLoadingTests:
                 }
             )
 
-        with RaiseDirectOrInsidePipegraph(ValueError):
+        with RaisesDirectOrInsidePipegraph(ValueError):
             a = regions.GenomicRegions("sharum", sample_data, [], get_genome())
             force_load(a.load)
 
@@ -270,7 +232,7 @@ class TestGenomicRegionsLoadingTests:
                 }
             )
 
-        with RaiseDirectOrInsidePipegraph(ValueError):
+        with RaisesDirectOrInsidePipegraph(ValueError):
             a = regions.GenomicRegions("sharum", sample_data, [], get_genome())
             force_load(a.load)
 
@@ -400,7 +362,7 @@ class TestGenomicRegionsLoadingTests:
             row["pick_me"] = numpy.max(subset_df["pick_me"])
             return row
 
-        with RaiseDirectOrInsidePipegraph(ValueError):
+        with RaisesDirectOrInsidePipegraph(ValueError):
             a = regions.GenomicRegions(
                 "shu",
                 sample_data,
@@ -426,7 +388,7 @@ class TestGenomicRegionsLoadingTests:
             row["does not exist"] = row["pick_me"]
             return row
 
-        with RaiseDirectOrInsidePipegraph(ValueError):
+        with RaisesDirectOrInsidePipegraph(ValueError):
             a = regions.GenomicRegions(
                 "shu",
                 sample_data,
@@ -452,7 +414,7 @@ class TestGenomicRegionsLoadingTests:
             del row["pick_me"]
             return None
 
-        with RaiseDirectOrInsidePipegraph(ValueError):
+        with RaisesDirectOrInsidePipegraph(ValueError):
             a = regions.GenomicRegions(
                 "shu",
                 sample_data,
@@ -671,7 +633,7 @@ class TestGenomicRegionsLoadingTests:
                 }
             )
 
-        with RaiseDirectOrInsidePipegraph(ValueError, "All starts need to be positive"):
+        with RaisesDirectOrInsidePipegraph(ValueError, "All starts need to be positive"):
             a = regions.GenomicRegions(
                 "shu", sample_data, [], get_genome_chr_length(), on_overlap="merge"
             )
@@ -731,7 +693,7 @@ class TestGenomicRegionsLoadingTests:
                 }
             )
 
-        with RaiseDirectOrInsidePipegraph(ValueError):
+        with RaisesDirectOrInsidePipegraph(ValueError):
             a = regions.GenomicRegions(
                 "shu",
                 sample_data,
@@ -888,7 +850,7 @@ class TestGenomicRegionsAnnotation:
 
 
 @pytest.mark.usefixtures("both_ppg_and_no_ppg")
-class TestGenomicRegionsWritingTests:
+class TestGenomicRegionsWriting:
     def setUp(self):
         def sample_data():
             return pd.DataFrame(
@@ -1042,7 +1004,7 @@ class TestFilterTestDependencies:
 
 
 @pytest.mark.usefixtures("both_ppg_and_no_ppg")
-class TestFilterTests:
+class TestFilter:
     def setUp(self):
         def sample_data():
             return pd.DataFrame(
@@ -1095,7 +1057,7 @@ class TestFilterTests:
 
     def test_select_top_k_raises_on_non_int(self):
         self.setUp()
-        with RaiseDirectOrInsidePipegraph(TypeError):
+        with RaisesDirectOrInsidePipegraph(TypeError):
             b = self.a.filter(
                 "sha", lambda df: df.sort_values("start", ascending=False)[:2.0]
             )
@@ -1165,7 +1127,7 @@ class TestFilterTests:
 
 
 @pytest.mark.usefixtures("both_ppg_and_no_ppg")
-class TestIntervalTests:
+class TestInterval:
     def setUp(self):
         def sample_data():
             return pd.DataFrame(
@@ -1490,7 +1452,7 @@ class TestIntervalTests:
 
 
 @pytest.mark.usefixtures("both_ppg_and_no_ppg")
-class TestIntervalTestsNeedingOverlapHandling(TestIntervalTests):
+class TestIntervalTestsNeedingOverlapHandling(TestInterval):
     def test_nested(self):
         def sample_data():
             return pd.DataFrame(
@@ -1511,7 +1473,7 @@ class TestIntervalTestsNeedingOverlapHandling(TestIntervalTests):
 
 
 @pytest.mark.usefixtures("both_ppg_and_no_ppg")
-class TestAssortedGenomicRegionTests:
+class TestAssortedGenomicRegion:
     def test_get_no_of_entries(self):
         def sample_data():
             return pd.DataFrame(
@@ -1578,7 +1540,7 @@ class TestAssortedGenomicRegionTests:
 
 
 @pytest.mark.usefixtures("both_ppg_and_no_ppg")
-class TestSetOperationsOnGenomicRegionsTest:
+class TestSetOperationsOnGenomicRegions:
     def sample_to_gr(self, a, name, on_overlap="merge"):
         if not hasattr(self, "genome"):
             self.genome = get_genome()
@@ -2044,7 +2006,7 @@ class TestSetOperationsOnGenomicRegionsTest:
 
 
 @pytest.mark.usefixtures("both_ppg_and_no_ppg")
-class TestFromXYZTests:
+class TestFromXYZ:
     def test_gff(self):
         a = regions.GenomicRegions_FromGFF(
             "shu",

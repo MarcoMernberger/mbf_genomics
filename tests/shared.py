@@ -28,6 +28,7 @@ def get_genome(name=None):
         ppg_genome._filename_lookups["cdna.fasta"],
         ppg_genome._filename_lookups["proteins.fasta"],
         ppg_genome._filename_lookups["genes.gtf"],
+        ppg_genome.cache_dir,
     )
 
 
@@ -50,14 +51,15 @@ def inside_ppg():
 
 
 def force_load(job, prefix=None):
+    """make sure a dataloadingjob has been loaded (if applicable)"""
     if inside_ppg():
         if prefix is None:
             if not isinstance(job, ppg.Job):
                 job = job()
             prefix = job.job_id
-        return ppg.JobGeneratingJob(
-            prefix + "_force_load", lambda: None
-        ).depends_on(job)
+        return ppg.JobGeneratingJob(prefix + "_force_load", lambda: None).depends_on(
+            job
+        )
 
 
 def caller_name(skip=2):
@@ -102,6 +104,7 @@ def caller_name(skip=2):
 
 
 def assert_image_equal(generated_image_path, tolerance=2):
+    """assert that the generated image and the base_images/... (test case name) is identical"""
     generated_image_path = Path(generated_image_path).absolute()
     extension = generated_image_path.suffix
     caller = caller_name(1)
@@ -124,3 +127,50 @@ def assert_image_equal(generated_image_path, tolerance=2):
         str(should_path), str(generated_image_path), tolerance, in_decorator=True
     )
     assert not err
+
+
+def run_pipegraph():
+    if inside_ppg():
+        ppg.run_pipegraph()
+    else:
+        pass
+
+
+class RaisesDirectOrInsidePipegraph(object):
+    """Piece of black magic from the depths of _pytest
+    that will check whether a piece of code will raise the
+    expected expcition (if outside of ppg), or if it will
+    rise the exception when the pipegraph is running
+
+    Use as a context manager like pytest.raises"""
+
+    def __init__(self, expected_exception, search_message=None):
+        self.expected_exception = expected_exception
+        self.message = "DID NOT RAISE {}".format(expected_exception)
+        self.search_message = search_message
+        self.excinfo = None
+
+    def __enter__(self):
+        import _pytest
+
+        self.excinfo = object.__new__(_pytest._code.ExceptionInfo)
+        return self.excinfo
+
+    def __exit__(self, *tp):
+        from _pytest.outcomes import fail
+
+        if inside_ppg():
+            with pytest.raises(ppg.RuntimeError) as e:
+                run_pipegraph()
+            assert isinstance(e.value.exceptions[0], self.expected_exception)
+            if self.search_message:
+                assert self.search_message in str(e.value.exceptions[0])
+        else:
+            __tracebackhide__ = True
+            if tp[0] is None:
+                fail(self.message)
+            self.excinfo.__init__(tp)
+            suppress_exception = issubclass(self.excinfo.type, self.expected_exception)
+            if sys.version_info[0] == 2 and suppress_exception:
+                sys.exc_clear()
+            return suppress_exception

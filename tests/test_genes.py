@@ -6,12 +6,20 @@ from mbf_fileformats.bed import read_bed
 import mbf_genomics.regions as regions
 import mbf_genomics.genes as genes
 from mbf_genomics.annotator import Constant
+from mbf_genomes import TestingGenome
 
-from .shared import get_genome, force_load
+from .shared import get_genome, get_genome_chr_length, force_load
 
 
 def DummyGenome(df_genes, df_transcripts=None):
-    g = get_genome()
+    chr_lengths = {
+            "1": 100_000,
+            "2": 200_000,
+            "3": 300_000,
+            "4": 400_000,
+            "5": 500_000,
+        }
+    
     df_genes = df_genes.rename(columns={"stable_id": "gene_stable_id"})
     if not "start" in df_genes.columns:
         starts = []
@@ -26,35 +34,40 @@ def DummyGenome(df_genes, df_transcripts=None):
         df_genes = df_genes.assign(start=starts, stop=stops)
     if not "biotype" in df_genes.columns:
         df_genes = df_genes.assign(biotype="protein_coding")
-    g.df_genes = df_genes
-    if df_transcripts:
-        g.df_transcripts = df_transcripts
+    df_genes = df_genes.sort_values(['chr', 'start'])
+    df_genes = df_genes.set_index('gene_stable_id')
+    if df_transcripts is not None:
         if not "biotype" in df_transcripts.columns:
-            df_transcripts = df_genes.assign(biotype="protein_coding")
-        if 'exons' in df_transcripts.columns:
-            if len(df_transcripts['exons'].iloc[0]) == 3:
-                df_transcripts = df_transcripts.assign(exons = [
-                    (x[0], x[1]) for x in df_transcripts['exons']])
+            df_transcripts = df_transcripts.assign(biotype="protein_coding")
+        if "exons" in df_transcripts.columns:
+            if len(df_transcripts["exons"].iloc[0]) == 3:
+                df_transcripts = df_transcripts.assign(
+                    exons=[(x[0], x[1]) for x in df_transcripts["exons"]]
+                )
+        df_transcripts = df_transcripts.set_index('transcript_stable_id')
+    return TestingGenome(
+        'dummy',
+        chr_lengths,
+        df_genes,
+        df_transcripts,
+        None,
+    )
 
-
-    return g
-
-
-@pytest.mark.usefixtures("newpipegraph")
-class GenesLoadingTests:
+@pytest.mark.usefixtures("new_pipegraph")
+class TestGenesLoading:
     def test_basic_loading_from_genome(self):
         g = genes.Genes(get_genome())
         force_load(g.load())
         ppg.run_pipegraph()
         assert len(g.df) == 246
-        assert (g.df["stable_id"][:3] == ["CRP_001", "CRP_002", "CRP_003"]).all()
-        assert g.df["stable_id"].iloc[-1] == "CRP_182"
-        assert g.df["start"].iloc[-1] == 158649
+        assert (g.df["gene_stable_id"][:3] == ["CRP_001", "CRP_002", "CRP_003"]).all()
+        assert g.df["gene_stable_id"].iloc[-1] == "CRP_182"
+        assert g.df["start"].iloc[-1] == 158649 -1
         assert g.df["stop"].iloc[-1] == 159662
         assert g.df["strand"].iloc[-1] == -1
 
     def test_alternative_loading_raises_on_non_df(self):
-        g = genes.Genes(get_genome(), lambda: None, "myname")
+        g = genes.Genes(get_genome_chr_length(), lambda: None, "myname")
         force_load(g.load())
 
         with pytest.raises(ValueError):
@@ -267,22 +280,6 @@ class GenesLoadingTests:
                     "tes": 5500,
                     "description": "bla",
                 },
-                {
-                    "stable_id": "fake2",
-                    "chr": "1",
-                    "strand": -1,
-                    "tss": 5400,
-                    "tes": 4900,
-                    "description": "bla",
-                },
-                {
-                    "stable_id": "fake3",
-                    "chr": "2",
-                    "strand": -1,
-                    "tss": 5400,
-                    "tes": 4900,
-                    "description": "bla",
-                },
             ]
         )
         counter = [0]
@@ -292,11 +289,16 @@ class GenesLoadingTests:
             return df
 
         g = genes.Genes(get_genome(), load, name="shu")
-        assert counter[0] == 0
-        g.do_load()
-        assert counter[0] == 1
-        g.do_load()
-        assert counter[0] == 1  # still one
+        if ppg.inside_ppg():
+            assert counter[0] == 0
+            g.load()
+            assert counter[0] == 0
+            g.load()
+            assert counter[0] == 0 
+        else:
+            assert counter[0] == 1
+            g.load()
+            assert counter[0] == 1
 
     def test_filtering_away_works(self):
         genome = DummyGenome(
@@ -338,7 +340,7 @@ class GenesLoadingTests:
         assert "stop" in filtered.df.columns
         assert "tss" in filtered.df.columns
         assert "tes" in filtered.df.columns
-        assert "stable_id" in filtered.df.columns
+        assert "gene_stable_id" in filtered.df.columns
 
     def test_annotators_are_kept_on_filtering(self):
         genome = DummyGenome(
@@ -382,15 +384,17 @@ class GenesLoadingTests:
         genesA = genes.Genes(genome)
         genesB = genes.Genes(genome)
         assert genesA is genesB
-        filterA = genesA.filter("fa", select_top_k=10)
-        filterAa = genesA.filter("faa", select_top_k=10)
-        filterB = genesB.filter("fab", select_top_k=10)
+        filterA = genesA.filter("fa", lambda df: df.index[:10])
+        filterAa = genesA.filter("faa", lambda df: df.index[:10])
+        filterB = genesB.filter("fab", lambda df: df.index[:10])
         assert not (filterA is genesA)
         assert not (filterAa is filterA)
         assert not (filterAa is filterB)
+        with pytest.raises(ValueError):
+            filterB = genesB.filter("fab", lambda df: df.index[:10])
 
     def test_filtering_returns_genes(self):
-        g = genes.Genes(get_genome()())
+        g = genes.Genes(get_genome())
         on_chr_1 = g.filter("on_1", lambda df: df["chr"] == "1")
         assert g.__class__ == on_chr_1.__class__
 
@@ -399,7 +403,7 @@ class GenesLoadingTests:
         a = genes.Genes(genome)
 
         def sample_data():
-            return pd.DataFrame({"chr": ["1"], "start": [1000], "stop": [1100]})
+            return pd.DataFrame({"chr": ["Chromosome"], "start": [1000], "stop": [1100]})
 
         b = regions.GenomicRegions("sha", sample_data, [], genome)
         force_load(a.load())
@@ -410,14 +414,13 @@ class GenesLoadingTests:
             a.overlap_genes(b)
 
     def test_overlap_genes_raises_on_unequal_genomes(self):
-        genome = get_genome('A')
-        genomeB = get_genome('B')
+        genome = get_genome("A")
+        genomeB = get_genome("B")
         a = genes.Genes(genome)
         b = genes.Genes(genomeB)
 
         with pytest.raises(ValueError):
             a.overlap_genes(b)
-
 
     def test_overlap(self):
         genome = DummyGenome(
@@ -453,7 +456,7 @@ class GenesLoadingTests:
         g = genes.Genes(genome)
         on_chr_1 = g.filter("on_1", lambda df: df["chr"] == "1")
         on_chr_2 = g.filter("on_2", lambda df: df["chr"] == "2")
-        one = g.filter("one", lambda df: df["stable_id"] == "fake1")
+        one = g.filter("one", lambda df: df["gene_stable_id"] == "fake1")
         force_load(on_chr_1.load())
         force_load(on_chr_2.load())
         force_load(one.load())
@@ -471,7 +474,7 @@ class GenesLoadingTests:
         assert one.overlap_genes(g) == len(one.df)
         assert one.overlap_genes(one) == len(one.df)
 
-        assert on_chr_1.overlap_genes(one.df) == 1
+        assert on_chr_1.overlap_genes(one) == 1
         assert one.overlap_genes(on_chr_1) == 1
 
         assert on_chr_1.overlap_genes(on_chr_2) == 0
@@ -509,7 +512,7 @@ class GenesLoadingTests:
             )
         )
         g = genes.Genes(genome)
-        tss = g.get_tss_regions()
+        tss = g.regions_tss()
         force_load(tss.load())
         ppg.run_pipegraph()
         assert len(tss.df) == 3
@@ -549,7 +552,7 @@ class GenesLoadingTests:
             )
         )
         g = genes.Genes(genome)
-        tes = g.get_tes_regions()
+        tes = g.regions_tes()
         force_load(tes.load())
         ppg.run_pipegraph()
         assert len(tes.df) == 2
@@ -609,7 +612,7 @@ class GenesLoadingTests:
             ),
         )
         g = genes.Genes(genome)
-        exons = genome.get_exon_regions_overlapping()
+        exons = g.regions_exons_overlapping()
         force_load(exons.load())
         ppg.run_pipegraph()
         assert (exons.df["start"] == [3000, 3100, 3300, 3750, 4910, 5100, 4900]).all()
@@ -668,7 +671,7 @@ class GenesLoadingTests:
             ),
         )
         g = genes.Genes(genome)
-        exons = genome.get_exon_regions_merged()
+        exons = g.regions_exons_merged()
         force_load(exons.load())
         ppg.run_pipegraph()
         assert (exons.df["start"] == [3000, 4910, 5100, 4900]).all()
@@ -724,7 +727,7 @@ class GenesLoadingTests:
             ),
         )
         g = genes.Genes(genome)
-        introns = g.get_intron_regions()
+        introns = g.regions_introns()
         force_load(introns.load())
         ppg.run_pipegraph()
         assert (introns.df["start"] == [3000, 3500, 4000, 5000]).all()
@@ -732,220 +735,11 @@ class GenesLoadingTests:
         # no intronic region on chr 2
         assert (introns.df["chr"] == ["1", "1", "1", "1"]).all()
 
-    def test_intronify_more_complex(self):
-        transcript = {
-            u"chr": "2R",
-            u"exons": [
-                (14243005, 14244766, 0),
-                (14177040, 14177355, 0),
-                (14176065, 14176232, 0),
-                (14175632, 14175893, 0),
-                (14172742, 14175244, 0),
-                (14172109, 14172226, 0),
-                (14170836, 14172015, 0),
-                (14169750, 14170749, 0),
-                (14169470, 14169683, 0),
-                (14169134, 14169402, 0),
-                (14167751, 14169018, 0),
-                (14166570, 14167681, 0),
-            ],
-            u"gene_stable_id": "FBgn0010575",
-            u"start": 14166570,
-            u"stop": 14244766,
-            u"strand": -1,
-            u"transcript_stable_id": "FBtr0301547",
-        }
-        gene = {
-            u"biotype": "protein_coding",
-            u"chr": "2R",
-            u"description": "CG5580 [Source:FlyBase;GeneId:FBgn0010575]",
-            u"name": "sbb",
-            u"stable_id": "FBgn0010575",
-            u"strand": -1,
-            u"tes": 14166570,
-            u"tss": 14244766,
-        }
-
-        g = genes.Genes(get_genome())
-        introns = g._intron_intervals(transcript, gene)
-        assert (
-            np.array(introns)
-            == [
-                (14167681, 14167751),
-                (14169018, 14169134),
-                (14169402, 14169470),
-                (14169683, 14169750),
-                (14170749, 14170836),
-                (14172015, 14172109),
-                (14172226, 14172742),
-                (14175244, 14175632),
-                (14175893, 14176065),
-                (14176232, 14177040),
-                (14177355, 14243005),
-            ]
-        ).all()
-
-    def test_intron_intervals_raises_on_inverted(self):
-        transcript = {
-            u"chr": "2R",
-            u"exons": [
-                (14243005, 14244766, 0),
-                (14177040, 14177355, 0),
-                (14176065, 14176232, 0),
-                (14175632, 14175893, 0),
-                (14172742, 14175244, 0),
-                (14172109, 14172226, 0),
-                (14172015, 14170836, 0),  # inverted
-                (14169750, 14170749, 0),
-                (14169470, 14169683, 0),
-                (14169134, 14169402, 0),
-                (14167751, 14169018, 0),
-                (14166570, 14167681, 0),
-            ],
-            u"gene_stable_id": "FBgn0010575",
-            u"start": 14166570,
-            u"stop": 14244766,
-            u"strand": -1,
-            u"transcript_stable_id": "FBtr0301547",
-        }
-        gene = {
-            u"biotype": "protein_coding",
-            u"chr": "2R",
-            u"description": "CG5580 [Source:FlyBase;GeneId:FBgn0010575]",
-            u"name": "sbb",
-            u"stable_id": "FBgn0010575",
-            u"strand": -1,
-            u"tes": 14166570,
-            u"tss": 14244766,
-        }
-        g = genes.Genes(get_genome())
-
-        with pytest.raises(ValueError):
-            introns = g._intron_intervals(transcript, gene)
-
-    def test_get_gene_exons(self):
-        genome = DummyGenome(
-            pd.DataFrame(
-                [
-                    {
-                        "stable_id": "fake1",
-                        "chr": "1",
-                        "strand": 1,
-                        "tss": 3000,
-                        "tes": 4900,
-                        "description": "bla",
-                        "name": "bla1",
-                    },
-                    {
-                        "stable_id": "fake2",
-                        "chr": "1",
-                        "strand": -1,
-                        "tss": 5400,
-                        "tes": 4900,
-                        "description": "bla",
-                        "name": "bla2",
-                    },
-                    {
-                        "stable_id": "fake3",
-                        "chr": "2",
-                        "strand": -1,
-                        "tss": 5400,
-                        "tes": 4900,
-                        "description": "bla",
-                        "name": "bla3",
-                    },
-                ]
-            ),
-            # {transcript_stable_id, gene_stable_id, strand, start, end, exons},
-            df_transcripts=pd.DataFrame(
-                {
-                    "transcript_stable_id": ["trans1a", "trans1b", "trans2", "trans3"],
-                    "gene_stable_id": ["fake1", "fake1", "fake2", "fake3"],
-                    "chr": ["1", "1", "1", "2"],
-                    "strand": [1, 1, -1, -1],
-                    "start": [3100, 3000, 4910, 4900],
-                    "stop": [4900, 4000, 5400, 5400],
-                    "exons": [
-                        [(3100, 4900, 0)],
-                        [(3000, 3500, 0), (3300, 3330, 0), (3750, 4000, 0)],
-                        [(4910, 5000, 0), (5100, 5400, 0)],
-                        [(4900, 5400, 0)],
-                    ],
-                }
-            ),
-        )
-        g = genes.Genes(genome)
-        force_load(g.load())
-        ppg.run_pipegrap()
-        two = g.get_gene_exons("fake2")
-        assert (two["start"] == [4910, 5100]).all()
-        assert (two["stop"] == [5000, 5400]).all()
-
-    def test_get_gene_introns(self):
-        genome = DummyGenome()(
-            pd.DataFrame(
-                [
-                    {
-                        "stable_id": "fake1",
-                        "chr": "1",
-                        "strand": 1,
-                        "tss": 3000,
-                        "tes": 4900,
-                        "description": "bla",
-                        "name": "bla1",
-                    },
-                    {
-                        "stable_id": "fake2",
-                        "chr": "1",
-                        "strand": -1,
-                        "tss": 5500,
-                        "tes": 4900,
-                        "description": "bla",
-                        "name": "bla2",
-                    },
-                    {
-                        "stable_id": "fake3",
-                        "chr": "2",
-                        "strand": -1,
-                        "tss": 5400,
-                        "tes": 4900,
-                        "description": "bla",
-                        "name": "bla3",
-                    },
-                ]
-            ),
-            # {transcript_stable_id, gene_stable_id, strand, start, end, exons},
-            df_transcripts=pd.DataFrame(
-                {
-                    "transcript_stable_id": ["trans1a", "trans1b", "trans2", "trans3"],
-                    "gene_stable_id": ["fake1", "fake1", "fake2", "fake3"],
-                    "chr": ["1", "1", "1", "2"],
-                    "strand": [1, 1, -1, -1],
-                    "start": [3100, 3000, 4910, 4900],
-                    "stop": [4900, 4000, 5400, 5400],
-                    "exons": [
-                        [(3100, 4900, 0)],
-                        [(3000, 3500, 0), (3300, 3330, 0), (3750, 4000, 0)],
-                        [(4910, 5000, 0), (5100, 5400, 0)],
-                        [(4900, 5400, 0)],
-                    ],
-                }
-            ),
-        )
-        g = genes.Genes(genome)
-        force_load(g.load())
-        ppg.run_pipegraph()
-        one = g.get_gene_introns("fake1")
-        print("one", one)
-        assert len(one) == 0
-
-        two = g.get_gene_introns("fake2")
-        assert (two["start"] == [4900, 5000, 5400]).all()
-        assert (two["stop"] == [4910, 5100, 5500]).all()
 
 
-@pytest.mark.usefixtures("newpipegraph")
-class GenesTests:
+
+@pytest.mark.usefixtures("new_pipegraph")
+class TestGenes:
     def test_write_bed(self):
         genome = DummyGenome(
             pd.DataFrame(
@@ -978,11 +772,11 @@ class GenesTests:
             )
         )
         g = genes.Genes(genome)
-        sample_filename = "cache/genes.bed"
+        sample_filename = "genes.bed"
         g.write_bed(sample_filename)
         ppg.run_pipegraph()
         assert len(g.df) > 0
-        read = read_bed(sample_filename)
+        read = read_bed(g.result_dir / sample_filename)
         assert len(read) == len(g.df)
         assert read[0].refseq == b"1"
         assert read[1].refseq == b"1"

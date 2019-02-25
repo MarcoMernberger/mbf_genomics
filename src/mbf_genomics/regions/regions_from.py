@@ -2,28 +2,11 @@ import pypipegraph as ppg
 import pandas as pd
 import numpy as np
 
-from .regions import GenomicRegions, merge_intervals
+from .regions import GenomicRegions
+from mbf_genomes.intervals import merge_intervals
 from mbf_externals.util import to_string
+from ..util import read_pandas
 
-
-def read_pandas(filename):
-    import pandas as pd
-
-    if filename.endswith(".xls") or filename.endswith(".xlsx"):
-        from xlrd import XLRDError
-
-        try:
-            filein = pd.read_excel(filename)
-        except XLRDError:
-            filein = pd.read_csv(filename, sep="\t")
-        return filein
-
-    elif filename.endswith(".tsv"):
-        return pd.read_csv(filename, sep="\t")
-    elif filename.endswith(".csv"):
-        return pd.read_csv(filename)
-    else:
-        raise ValueError("Unknown filetype: %s" % filename)
 
 
 def GenomicRegions_FromGFF(

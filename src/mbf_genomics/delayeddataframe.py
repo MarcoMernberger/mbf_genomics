@@ -142,7 +142,9 @@ class DelayedDataFrame(object):
             for anno in annotators:
                 self += anno
 
+        print('dependencies are', dependencies)
         result = self._new_for_filtering(new_name, load, dependencies)
+        print(result.load_strategy.deps)
         result.parent = self
         result.filter_annos = annotators
         for anno in self.annotators.values():
@@ -173,7 +175,7 @@ class DelayedDataFrame(object):
         return result
 
     def get_table_filename(self):
-        return os.path.join(self.result_dir, self.name + ".tsv")
+        return self.result_dir/( self.name + ".tsv")
 
     def mangle_df_for_write(self, df):
         return df
@@ -183,10 +185,9 @@ class DelayedDataFrame(object):
         To sort, filter, remove columns, etc before output,
         pass in a mangler_function (takes df, returns df)
         """
-        if output_filename is None:
-            output_filename = self.get_table_filename()
+        output_filename = self.pathify(output_filename, self.get_table_filename().absolute())
 
-        def write(ouput_filename):
+        def write(output_filename):
             if mangler_function:
                 df = mangler_function(self.df.copy())
             else:
@@ -213,9 +214,7 @@ class DelayedDataFrame(object):
         return self.load_strategy.generate_file(output_filename, write, deps)
 
     def plot(self, output_filename, plot_func, calc_func=None):
-        output_filename = Path(output_filename)
-        if not output_filename.is_absolute():
-            output_filename = self.result_dir / output_filename
+        output_filename = self.pathify(output_filename)
         def do_plot(output_filename=output_filename):
             df = self.df
             if calc_func is not None:
@@ -233,6 +232,15 @@ class DelayedDataFrame(object):
         else:
             deps = []
         return self.load_strategy.generate_file(output_filename, do_plot, deps)
+
+    def pathify(self, output_filename, default=None):
+        if output_filename is None:
+            output_filename = default
+        output_filename = Path(output_filename)
+        if not output_filename.is_absolute():
+            output_filename = self.result_dir / output_filename
+        return output_filename.absolute()
+
 
 
 class Load_Direct:
