@@ -1,12 +1,12 @@
 import pypipegraph as ppg
 import pandas as pd
 import numpy as np
+import math
 
 from .regions import GenomicRegions
 from mbf_genomes.intervals import merge_intervals
 from mbf_externals.util import to_string
 from ..util import read_pandas
-
 
 
 def GenomicRegions_FromGFF(
@@ -85,13 +85,7 @@ def GenomicRegions_FromGFF(
     else:
         deps = []
     return alternative_class(
-        name,
-        load,
-        deps,
-        genome,
-        on_overlap,
-        summit_annotator=summit_annotator,
-        vid=vid,
+        name, load, deps, genome, on_overlap, summit_annotator=summit_annotator, vid=vid
     )
 
 
@@ -132,13 +126,7 @@ def GenomicRegions_FromWig(
         deps = []
 
     return GenomicRegions(
-        name,
-        load,
-        deps,
-        genome,
-        on_overlap,
-        summit_annotator=summit_annotator,
-        vid=vid,
+        name, load, deps, genome, on_overlap, summit_annotator=summit_annotator, vid=vid
     )
 
 
@@ -159,7 +147,7 @@ def GenomicRegions_FromBed(
     from mbf_fileformats.bed import read_bed
 
     if chromosome_mangler is None:
-        chromosome_mangler = lambda x: x
+        chromosome_mangler = lambda x: x  # noqa:E731
 
     def load():
         valid_chromosomes = set(genome.get_chromosome_lengths())
@@ -187,6 +175,7 @@ def GenomicRegions_FromBed(
         if len(res["name"].unique()) == 1:
             res = res.drop(["name"], axis=1)
         return res
+
     if ppg.inside_ppg():
         deps = [
             ppg.FileTimeInvariant(filename),
@@ -224,7 +213,7 @@ def GenomicRegions_FromBigBed(
     import pyBigWig
 
     if chromosome_mangler is None:
-        chromosome_mangler = lambda x: x
+        chromosome_mangler = lambda x: x  # noqa:E731
 
     def load():
         data = {"chr": [], "start": [], "stop": [], "strand": []}
@@ -332,7 +321,10 @@ def GenomicRegions_Union(
         )
 
     def load():
-        if expand_by_x_bp:
+        if not expand_by_x_bp:
+            dfs = [x.df[["chr", "start", "stop"]] for x in list_of_grs]
+            return pd.concat(dfs, axis=0)
+        else:
             dfs = [
                 pd.DataFrame(
                     {
@@ -343,6 +335,7 @@ def GenomicRegions_Union(
                 )
                 for x in list_of_grs
             ]
+            ret = pd.concat(dfs, axis=0)
             if (ret["start"] <= 0).any():
                 if allowed_on_below_zero_by_expansion == "raise":
                     raise ValueError(
@@ -361,14 +354,11 @@ def GenomicRegions_Union(
                         "Do not know how to handle on_below_zero_by_expansion of %s"
                         % on_below_zero_by_expansion
                     )
-        else:
-            dfs = [x.df[["chr", "start", "stop"]] for x in list_of_grs]
-        ret = pd.concat(dfs, axis=0)
-        return ret
+            return ret
 
     if len(set([x.genome for x in list_of_grs])) > 1:
         raise ValueError("Can only merge GenomicRegions that have the same genome")
-    
+
     if ppg.inside_ppg():
         deps = [x.load() for x in list_of_grs]
         deps.append(
@@ -474,13 +464,7 @@ def GenomicRegions_FromPartec(
         deps = []
 
     return GenomicRegions(
-        name,
-        load,
-        deps,
-        genome,
-        on_overlap,
-        summit_annotator=summit_annotator,
-        vid=vid,
+        name, load, deps, genome, on_overlap, summit_annotator=summit_annotator, vid=vid
     )
 
 
@@ -497,7 +481,6 @@ def GenomicRegions_FromTable(
     """Read a table file (csv/tsv/xls) with the correct chr/start/stop columns, drop all further columns"""
 
     def load():
-        import common
 
         df = read_pandas(filename)
         df["chr"] = df["chr"].astype(str)
@@ -517,13 +500,7 @@ def GenomicRegions_FromTable(
     else:
         deps = []
     return GenomicRegions(
-        name,
-        load,
-        deps,
-        genome,
-        on_overlap,
-        sheet_name=sheet_name,
-        vid=vid,
+        name, load, deps, genome, on_overlap, sheet_name=sheet_name, vid=vid
     )
 
 
@@ -537,13 +514,12 @@ def GenomicRegions_FromGenome(genome):
             data["start"].append(0)
             data["stop"].append(len(value))
         return pd.DataFrame(data)
+
     if ppg.inside_ppg():
         deps = [genome.get_dependencies()]
     else:
         deps = []
-    return GenomicRegions(
-        "spike_genomic_region", __loading_function, deps, genome
-    )
+    return GenomicRegions("spike_genomic_region", __loading_function, deps, genome)
 
 
 def GenomicRegions_CommonInAtLeastX(
@@ -611,13 +587,15 @@ def GenomicRegions_FromMotifHits(name, motif, threshold, genome):
         return pd.DataFrame(
             {"chr": chrs, "start": starts, "stop": stops, "scores": scores}
         )
+
     if ppg.inside_ppg():
         deps = [
-        motif.load(),
-        ppg.ParameterInvariant("GR_%s" % name, (threshold,)),
-        genome.get_dependencies(),
-    ]
-    else: deps = []
+            motif.load(),
+            ppg.ParameterInvariant("GR_%s" % name, (threshold,)),
+            genome.get_dependencies(),
+        ]
+    else:
+        deps = []
     return GenomicRegions(
         name, load, deps, genome, on_overlap="ignore", sheet_name="Motif"
     )
@@ -645,8 +623,8 @@ def GenomicRegions_Windows(
         stops = []
         chr_lengths = genome.get_chromosome_lengths()
         for c in chrs_to_include:
-            l = chr_lengths[c]
-            for ii in range(0, l, window_size + window_spacing):
+            ll = chr_lengths[c]
+            for ii in range(0, ll, window_size + window_spacing):
                 chrs.append(c)
                 starts.append(ii)
                 stops.append(ii + window_size)

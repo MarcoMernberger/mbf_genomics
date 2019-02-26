@@ -10,7 +10,7 @@ import pandas as pd
 import pypipegraph as ppg
 import numpy as np
 import subprocess
-from mbf_externals.util import chmod, to_string, to_bytes
+from mbf_externals.util import to_string, to_bytes
 from pathlib import Path
 
 file_path = Path(__file__).parent
@@ -44,8 +44,8 @@ def promotorize(basepairs=1250):
         res["start"][forward] -= basepairs
         res["start"][res["start"] < 0] = 0
         res["stop"][~forward] += basepairs
-        res['strand'] = df['strand']
-        res['gene_stable_id'] = df['gene_stable_id']
+        res["strand"] = df["strand"]
+        res["gene_stable_id"] = df["gene_stable_id"]
         return pd.DataFrame(res)
 
     return do_promotorize, [], basepairs
@@ -102,11 +102,9 @@ def merge_connected():
     """
 
     def do_merge(df):
-        res = {"chr": [], "start": [], "stop": []}
         df = df.sort_values(
             ["chr", "start"], ascending=[True, True]
         )  # you need to do this here so it's true later. Also it makes a copy...
-        new_rows = []
         last_chr = None
         last_stop = -1
         last_row = None
@@ -150,7 +148,8 @@ def merge_connected():
 class LiftOver(object):
     def __init__(self):
         import mbf_genomes
-        from  mbf_externals.kent import LiftOver as LiftOverAlgorithm
+        from mbf_externals.kent import LiftOver as LiftOverAlgorithm
+
         self.data_path = mbf_genomes.data_path / "liftovers"
         self.replacements = {"hg19to38": {"11_gl000202_random": "GL000202.1"}}
         self.algo = LiftOverAlgorithm()

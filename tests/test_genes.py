@@ -6,7 +6,6 @@ from mbf_fileformats.bed import read_bed
 import mbf_genomics.regions as regions
 import mbf_genomics.genes as genes
 from mbf_genomics.annotator import Constant
-from mbf_genomes import HardCodedGenome
 
 from .shared import (
     get_genome,
@@ -14,38 +13,9 @@ from .shared import (
     force_load,
     run_pipegraph,
     RaisesDirectOrInsidePipegraph,
+    MockGenome,
 )
 
-
-def DummyGenome(df_genes, df_transcripts=None):
-    chr_lengths = {"1": 100_000, "2": 200_000, "3": 300_000, "4": 400_000, "5": 500_000}
-
-    df_genes = df_genes.rename(columns={"stable_id": "gene_stable_id"})
-    if not "start" in df_genes.columns:
-        starts = []
-        stops = []
-        for idx, row in df_genes.iterrows():
-            if row["strand"] == 1:
-                starts.append(row["tss"])
-                stops.append(row["tes"])
-            else:
-                starts.append(row["tes"])
-                stops.append(row["tss"])
-        df_genes = df_genes.assign(start=starts, stop=stops)
-    if not "biotype" in df_genes.columns:
-        df_genes = df_genes.assign(biotype="protein_coding")
-    df_genes = df_genes.sort_values(["chr", "start"])
-    df_genes = df_genes.set_index("gene_stable_id")
-    if df_transcripts is not None:
-        if not "biotype" in df_transcripts.columns:
-            df_transcripts = df_transcripts.assign(biotype="protein_coding")
-        if "exons" in df_transcripts.columns:
-            if len(df_transcripts["exons"].iloc[0]) == 3:
-                df_transcripts = df_transcripts.assign(
-                    exons=[(x[0], x[1]) for x in df_transcripts["exons"]]
-                )
-        df_transcripts = df_transcripts.set_index("transcript_stable_id")
-    return HardCodedGenome("dummy", chr_lengths, df_genes, df_transcripts, None)
 
 @pytest.mark.usefixtures("new_pipegraph")
 class TestGenesLoadingPPGOnly:
@@ -65,6 +35,7 @@ class TestGenesLoadingPPGOnly:
         force_load(filterA.load)
         ppg.run_pipegraph()
         assert len(filterA.df) == 10
+
 
 @pytest.mark.usefixtures("both_ppg_and_no_ppg")
 class TestGenesLoading:
@@ -313,7 +284,7 @@ class TestGenesLoading:
             assert counter[0] == 1
 
     def test_filtering_away_works(self):
-        genome = DummyGenome(
+        genome = MockGenome(
             pd.DataFrame(
                 [
                     {
@@ -355,7 +326,7 @@ class TestGenesLoading:
         assert "gene_stable_id" in filtered.df.columns
 
     def test_annotators_are_kept_on_filtering(self):
-        genome = DummyGenome(
+        genome = MockGenome(
             pd.DataFrame(
                 [
                     {
@@ -391,7 +362,6 @@ class TestGenesLoading:
         filtered = g.filter("nogenes", lambda df: df["chr"] == "4")
         assert filtered.has_annotator(ca)
 
-    
     def test_filtering_returns_genes(self):
         g = genes.Genes(get_genome())
         on_chr_1 = g.filter("on_1", lambda df: df["chr"] == "1")
@@ -424,7 +394,7 @@ class TestGenesLoading:
             a.overlap_genes(b)
 
     def test_overlap(self):
-        genome = DummyGenome(
+        genome = MockGenome(
             pd.DataFrame(
                 [
                     {
@@ -482,7 +452,7 @@ class TestGenesLoading:
         assert on_chr_2.overlap_genes(on_chr_1) == 0
 
     def test_get_tss_regions(self):
-        genome = DummyGenome(
+        genome = MockGenome(
             pd.DataFrame(
                 [
                     {
@@ -522,7 +492,7 @@ class TestGenesLoading:
         assert (tss.df["chr"] == ["1", "1", "2"]).all()
 
     def test_get_tes_regions(self):
-        genome = DummyGenome(
+        genome = MockGenome(
             pd.DataFrame(
                 [
                     {
@@ -562,7 +532,7 @@ class TestGenesLoading:
         assert (tes.df["chr"] == ["1", "2"]).all()
 
     def test_get_exons_regions_overlapping(self):
-        genome = DummyGenome(
+        genome = MockGenome(
             pd.DataFrame(
                 [
                     {
@@ -604,10 +574,10 @@ class TestGenesLoading:
                     "start": [3100, 3000, 4910, 4900],
                     "stop": [4900, 4000, 5400, 5400],
                     "exons": [
-                        [(3100, 4900, 0)],
-                        [(3000, 3500, 0), (3300, 3330, 0), (3750, 4000, 0)],
-                        [(4910, 5000, 0), (5100, 5400, 0)],
-                        [(4900, 5400, 0)],
+                        [(3100, 4900)],
+                        [(3000, 3500), (3300, 3330), (3750, 4000)],
+                        [(4910, 5000), (5100, 5400)],
+                        [(4900, 5400)],
                     ],
                 }
             ),
@@ -621,7 +591,7 @@ class TestGenesLoading:
         assert (exons.df["chr"] == np.array(["1", "1", "1", "1", "1", "1", "2"])).all()
 
     def test_get_exons_regions_merging(self):
-        genome = DummyGenome(
+        genome = MockGenome(
             pd.DataFrame(
                 [
                     {
@@ -663,10 +633,10 @@ class TestGenesLoading:
                     "start": [3100, 3000, 4910, 4900],
                     "stop": [4900, 4000, 5400, 5400],
                     "exons": [
-                        [(3100, 4900, 0)],
-                        [(3000, 3500, 0), (3300, 3330, 0), (3750, 4000, 0)],
-                        [(4910, 5000, 0), (5100, 5400, 0)],
-                        [(4900, 5400, 0)],
+                        [(3100, 4900)],
+                        [(3000, 3500), (3300, 3330), (3750, 4000)],
+                        [(4910, 5000), (5100, 5400)],
+                        [(4900, 5400)],
                     ],
                 }
             ),
@@ -680,7 +650,7 @@ class TestGenesLoading:
         assert (exons.df["chr"] == ["1", "1", "1", "2"]).all()
 
     def test_get_intron_regions(self):
-        genome = DummyGenome(
+        genome = MockGenome(
             pd.DataFrame(
                 [
                     {
@@ -719,10 +689,10 @@ class TestGenesLoading:
                     "start": [3100, 3000, 4900, 4900],
                     "stop": [4900, 4000, 5400, 5400],
                     "exons": [
-                        [(3100, 4900, 0)],
-                        [(3000, 3500, 0), (3750, 4000, 0)],
-                        [(4900, 5000, 0), (5100, 5400, 0)],
-                        [(4900, 5400, 0)],
+                        [(3100, 4900)],
+                        [(3000, 3500), (3750, 4000)],
+                        [(4900, 5000), (5100, 5400)],
+                        [(4900, 5400)],
                     ],
                 }
             ),
@@ -740,7 +710,7 @@ class TestGenesLoading:
 @pytest.mark.usefixtures("new_pipegraph")
 class TestGenes:
     def test_write_bed(self):
-        genome = DummyGenome(
+        genome = MockGenome(
             pd.DataFrame(
                 [
                     {
@@ -791,7 +761,7 @@ class TestGenes:
         assert read[2].name == b"fake3"
 
     def test_write_bed_auto_filename(self):
-        genome = DummyGenome(
+        genome = MockGenome(
             pd.DataFrame(
                 [
                     {

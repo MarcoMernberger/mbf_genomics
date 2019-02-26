@@ -1,7 +1,6 @@
 from pathlib import Path
 import pandas as pd
 import pypipegraph as ppg
-import os
 
 from .annotator import Annotator
 from mbf_externals.util import lazy_method
@@ -56,8 +55,7 @@ class DelayedDataFrame(object):
         return "DelayedDataFrame(%s)" % self.name
 
     def load(self):
-        df = self.load_strategy.load()
-        return df
+        return self.load_strategy.load()
 
     def __iadd__(self, other):
         """Add and return self"""
@@ -135,7 +133,8 @@ class DelayedDataFrame(object):
             )
             dependencies.append(
                 ppg.FunctionInvariant(
-                    self.__class__.__name__ + "_" + new_name + '_filter', df_filter_function
+                    self.__class__.__name__ + "_" + new_name + "_filter",
+                    df_filter_function,
                 )
             )
 
@@ -353,7 +352,8 @@ class Load_PPG:
         forbidden_chars = "/", "?", "*"
         if any((x in cache_name for x in forbidden_chars)) or len(cache_name) > 60:
             raise ValueError(
-                "annotator.column_names[0] not suitable as a cache_name, add cache_name property"
+                "annotator.column_names[0] not suitable as a cache_name (was %s), add cache_name property"
+                % repr(cache_name)
             )
         if (
             cache_name in self.ddf.annotators
@@ -370,6 +370,7 @@ class Load_PPG:
             self.ddf.anno_jobs[cache_name] = self.get_anno_dependency_callback(anno)
         for c in self.ddf.children:
             c += anno
+        return self.ddf.anno_jobs[cache_name]
 
     @lazy_method
     def load(self):
@@ -511,7 +512,7 @@ class Load_PPG:
         job.depends_on(
             self.load(),
             ppg.FunctionInvariant(
-                self.ddf.cache_dir / (anno.get_cache_name() + "_func"),
+                self.ddf.cache_dir / (anno.get_cache_name() + "_calc_func"),
                 anno.calc if hasattr(anno, "calc") else anno.calc_ddf,
             ),
         )
@@ -521,6 +522,6 @@ class Load_PPG:
         return job
 
     def annotate(self):
-        res = lambda: self.ddf.anno_jobs.values()
+        res = lambda: self.ddf.anno_jobs.values()  # noqa: E731
         res.job_id = self.ddf.name + "_annotate_callback"
         return res

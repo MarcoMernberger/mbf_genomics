@@ -559,12 +559,14 @@ class Test_DelayedDataFramePPG:
             return test_df
 
         a = DelayedDataFrame("shu", load)
-        fn = a.write(mangler_function=lambda df:df)
+        a.write(mangler_function=lambda df: df)
+
         def b(df):
             return df.head()
+
         with pytest.raises(ppg.JobContractError):
-            fn2 = a.write(mangler_function=b)
-        
+            a.write(mangler_function=b)
+
     def test_annotator_basic(self):
         a = DelayedDataFrame(
             "shu", lambda: pd.DataFrame({"A": [1, 2], "B": ["c", "d"]})

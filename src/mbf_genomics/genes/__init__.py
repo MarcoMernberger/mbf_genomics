@@ -9,6 +9,7 @@ from .genes_from import (
     Genes_FromFileOfTranscripts,
     Genes_FromBiotypes,
 )
+from . import anno_tag_counts
 
 
 __all__ = [
@@ -21,4 +22,5 @@ __all__ = [
     "Genes_FromFile",
     "Genes_FromFileOfTranscripts",
     "Genes_FromBiotypes",
+    "anno_tag_counts",
 ]

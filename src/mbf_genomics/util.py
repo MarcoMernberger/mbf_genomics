@@ -1,7 +1,7 @@
 import pandas as pd
-def read_pandas(filename):
-    import pandas as pd
 
+
+def read_pandas(filename):
     if filename.endswith(".xls") or filename.endswith(".xlsx"):
         from xlrd import XLRDError
 
@@ -17,5 +17,3 @@ def read_pandas(filename):
         return pd.read_csv(filename)
     else:
         raise ValueError("Unknown filetype: %s" % filename)
-
-

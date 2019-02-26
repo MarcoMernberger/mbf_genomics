@@ -1,21 +1,12 @@
-import tempfile
 import pypipegraph as ppg
-import os
 import numpy as np
 import pandas as pd
-import itertools
-import math
-import random
-import six
 from pathlib import Path
 
 
 from mbf_genomics.delayeddataframe import DelayedDataFrame
-from mbf_genomics.annotator import Annotator
-from mbf_genomes.common import reverse_complement
 from mbf_genomes import GenomeBase
 from mbf_externals.util import lazy_property
-from mbf_fileformats.util import pathify
 from .annotators import SummitMiddle
 from mbf_genomes.intervals import (
     merge_intervals,
@@ -403,7 +394,6 @@ class GenomicRegions(DelayedDataFrame):
         stop_array = self.df["stop"][chr_start:chr_stop]
         first_start_smaller = np.searchsorted(start_array, start) - 1
         first_end_larger = np.searchsorted(stop_array, stop, "right") + 1
-        result = []
         if hasattr(first_start_smaller, "__iter__"):
             first_start_smaller = first_start_smaller[0]
         if hasattr(first_end_larger, "__iter__"):

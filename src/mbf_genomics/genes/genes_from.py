@@ -152,7 +152,6 @@ def Genes_FromFile(
     """Filter Genes(genome) to those occuring in the table_filename"""
 
     def filter(genes_df):
-        import common
 
         df = read_pandas(table_filename)
         seen = df[column_name].values

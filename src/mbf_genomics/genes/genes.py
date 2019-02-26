@@ -5,8 +5,6 @@ import pypipegraph as ppg
 import pandas as pd
 from pathlib import Path
 from mbf_externals.util import lazy_method
-from mbf_fileformats.bed import write_bed
-from mbf_genomes.intervals import merge_intervals
 
 _exon_regions_overlapping_cache = {}
 _genes_per_genome_singletons = {}
@@ -62,7 +60,7 @@ class Genes(GenomicRegions):
             else:
                 self.top_level = False
             if alternative_load_func is None:
-                load_func = lambda: genome.df_genes.reset_index()
+                load_func = lambda: genome.df_genes.reset_index()  # noqa: E731
             else:
                 load_func = alternative_load_func
 
@@ -199,7 +197,10 @@ class Genes(GenomicRegions):
             )
 
         if (df["start"] > df["stop"]).any():
-            raise ValueError("Genes.loading_function returned a negative interval")
+            raise ValueError(
+                "Genes.loading_function returned a negative interval:\n %s"
+                % df[df["start"] > df["stop"]].head()
+            )
         self.df = df.sort_values(["chr", "start"], ascending=[True, True]).reset_index(
             drop=True
         )  # since we don't call handle_overlap
@@ -292,7 +293,6 @@ class Genes(GenomicRegions):
                 "intron_rank": [],
                 "gene_stable_id": [],
             }
-            df_genes = self.genome.df_genes
             canonical_chromosomes = self.genome.get_chromosome_lengths()
             for (transcript_stable_id, transcript_row) in self.genome.df_transcripts[
                 ["gene_stable_id", "chr", "strand"]
@@ -323,42 +323,24 @@ class Genes(GenomicRegions):
             on_overlap="ignore",
         )
 
-    def _regions_exons(self):
-        def load():
-            res = {
-                "chr": [],
-                "start": [],
-                "stop": [],
-                "transcript_stable_id": [],
-                "gene_stable_id": [],
-            }
-            df_genes = self.genome.df_genes
-            canonical_chromosomes = self.genome.get_chromosome_lengths()
-            for (transcript_stable_id, transcript_row) in self.genome.df_transcripts[
-                ["gene_stable_id", "chr", "strand"]
-            ].iterrows():
-                if not transcript_row["chr"] in canonical_chromosomes:
-                    continue
-                tr = self.genome.transcript(transcript_stable_id)
-                exons = tr.exons
-                for start, stop in exons:
-                    res["chr"].append(transcript_row["chr"])
-                    res["start"].append(start)
-                    res["stop"].append(stop)
-                    res["transcript_stable_id"].append(transcript_stable_id)
-                    res["gene_stable_id"].append(transcript_row["gene_stable_id"])
-            return pd.DataFrame(res)
-
-        return load
-
     @lazy_method
     def regions_exons_overlapping(self):
         """Return positions of all exonic regions - possibly overlapping"""
 
+        if self.load_strategy.build_deps:
+            deps = [
+                self.load(),
+                ppg.FunctionInvariant(
+                    "GenomicRegions_{self.name}_exons_overlapping_actual_load",
+                    type(self.genome).df_exons,
+                ),
+            ]
+        else:
+            deps = []
         return GenomicRegions(
-            self.name + " exons",
-            self._regions_exons(),
-            [self.load()],
+            self.name + "_exons_overlapping",
+            lambda: self.genome.df_exons,
+            deps,
             self.genome,
             on_overlap="ignore",
         )
@@ -366,11 +348,21 @@ class Genes(GenomicRegions):
     @lazy_method
     def regions_exons_merged(self):
         """Return positions of all exonic regions - possibly overlapping"""
+        if self.load_strategy.build_deps:
+            deps = [
+                self.load(),
+                ppg.FunctionInvariant(
+                    "GenomicRegions_{self.name}_exons_merged_actual_load",
+                    type(self.genome).df_exons,
+                ),
+            ]
+        else:
+            deps = []
 
         return GenomicRegions(
-            self.name + " exons",
-            self._regions_exons(),
-            [self.load()],
+            self.name + "_exons_merged",
+            lambda: self.genome.df_exons,
+            deps,
             self.genome,
             on_overlap="merge",
         )
