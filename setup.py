@@ -25,6 +25,6 @@ except VersionConflict:
 if __name__ == "__main__":
     setup(
         use_pyscaffold=True,
-        ext_modules=cythonize("src/mbf_genomics/motifs/*.pyx"),
+        #ext_modules=cythonize("src/mbf_genomics/motifs/*.pyx"),
         include_dirs=[numpy.get_include()],
     )

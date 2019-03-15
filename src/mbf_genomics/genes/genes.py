@@ -43,7 +43,10 @@ class Genes(GenomicRegions):
             if (
                 alternative_load_func is not None
                 and alternative_load_func != self.genes_load_func
-            ):
+            ):  # pragma: no cover -
+                # this can only happen iff somebody starts to singletonize the Genes
+                # with loading_functions - otherwise the duplicate object
+                # checker will kick in first
                 raise ValueError(
                     "Trying to define Genes(%s) twice with different loading funcs"
                     % self.name
@@ -131,9 +134,9 @@ class Genes(GenomicRegions):
                 on_overlap="ignore",
                 result_dir=result_dir,
                 sheet_name=sheet_name,
+                summit_annotator=False,
             )
             if self.load_strategy.build_deps:
-                print("hello")
                 deps = [genome.download_genome()]
                 deps.append(ppg.FunctionInvariant(self.name + "_load", load_func))
                 deps.append(genome.job_genes())
@@ -148,7 +151,7 @@ class Genes(GenomicRegions):
     def _load(self):
         """Load func
         """
-        if hasattr(self, "df"):
+        if hasattr(self, "df"):  # pragma: no cover
             return
         df = self.genes_load_func()
 
@@ -184,7 +187,7 @@ class Genes(GenomicRegions):
                 )
             if not np.issubdtype(df["tes"].dtype, np.integer):
                 raise ValueError(
-                    "tes needs to be an integer, was: %s" % df["tss"].dtype
+                    "tes needs to be an integer, was: %s" % df["tes"].dtype
                 )
             # df = self.handle_overlap(df) Genes don't care about overlap
             if not "start" in df.columns:
@@ -297,7 +300,9 @@ class Genes(GenomicRegions):
             for (transcript_stable_id, transcript_row) in self.genome.df_transcripts[
                 ["gene_stable_id", "chr", "strand"]
             ].iterrows():
-                if not transcript_row["chr"] in canonical_chromosomes:
+                if (
+                    not transcript_row["chr"] in canonical_chromosomes
+                ):  # pragma: no cover
                     continue
                 tr = self.genome.transcript(transcript_stable_id)
                 introns = tr.introns
@@ -389,55 +394,44 @@ class Genes(GenomicRegions):
         return self.load_strategy.generate_file(output_filename, write, deps)
 
     def write(self, output_filename=None, mangler_function=None):
-        if not hasattr(self, "_write_mangler_function"):
-            self._write_mangler_function = {}
-        output_filename = self.pathify(output_filename, self.get_table_filename())
-        if not self._default_mangler and mangler_function is not None:
+        if output_filename is None and mangler_function is not None:
             raise ValueError(
-                "There already is a different mangler function for %s, use this or provide an alternative filename."
-                % output_filename
+                "plain write (without output filename) is always unmangled"
             )
-        if not output_filename in self._write_mangler_function:
-            self._default_mangler = mangler_function is None
+        output_filename = self.pathify(output_filename, self.get_table_filename())
+        output_filename.parent.mkdir(exist_ok=True, parents=True)
 
-            def write_mangler_function(df):
-                """Establish a decent column order for genes.write"""
-                order = [
-                    "gene_stable_id",
-                    "name",
-                    "chr",
-                    "start",
-                    "stop",
-                    "strand",
-                    "tss",
-                    "tes",
-                    "description",
-                    "biotype",
+        def write_mangler_function(df):
+            """Establish a decent column order for genes.write"""
+            order = [
+                "gene_stable_id",
+                "name",
+                "chr",
+                "start",
+                "stop",
+                "strand",
+                "tss",
+                "tes",
+                "description",
+                "biotype",
+            ]
+            order = [x for x in order if x in df.columns]
+            real_order = order + sorted(
+                [
+                    x
+                    for x in df.columns
+                    if x not in order
+                    and not x.startswith("mysummit")
+                    and not x == "parent_row"
                 ]
-                order = [x for x in order if x in df.columns]
-                real_order = order + sorted(
-                    [
-                        x
-                        for x in df.columns
-                        if x not in order
-                        and not x.startswith("mysummit")
-                        and not x == "parent_row"
-                    ]
-                )
-                if "parent_row" in df.columns:
-                    real_order += ["parent_row"]
-                df = df[real_order]
-                if mangler_function:
-                    df = mangler_function(df.copy())
-                return df
-
-            self._write_mangler_function[output_filename] = write_mangler_function
-        return GenomicRegions.write(
-            self,
-            output_filename,
-            mangler_function=self._write_mangler_function[output_filename],
-        ).depends_on(
-            ppg.FunctionInvariant(
-                output_filename + "genes_mangler", self.mangler_dict[output_filename]
             )
+            if "parent_row" in df.columns:
+                real_order += ["parent_row"]
+            df = df[real_order]
+            if mangler_function:
+                df = mangler_function(df.copy())
+            return df
+
+        return GenomicRegions.write(
+            self, output_filename, mangler_function=write_mangler_function
         )

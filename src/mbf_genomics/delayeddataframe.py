@@ -205,12 +205,6 @@ class DelayedDataFrame(object):
             else:
                 df.to_csv(output_filename, sep="\t", index=False, encoding="utf-8")
 
-        # if output_filename not in self.mangler_dict:
-        # self.mangler_dict[output_filename] = mangler_function
-        # else:
-        # if ppg.util.is_same_function(self.mangler_dict[output_filename] != mangler_function):
-        # raise ValueErr
-
         if self.load_strategy.build_deps:
             deps = [
                 self.annotate(),
@@ -247,6 +241,10 @@ class DelayedDataFrame(object):
         return self.load_strategy.generate_file(output_filename, do_plot, deps)
 
     def pathify(self, output_filename, default=None):
+        """Turn output_filename into a Path. If it's a relative path, treat
+        it as relative to self.result_dir,
+        if it's absolute, take it is at is
+        """
         if output_filename is None:
             output_filename = default
         output_filename = Path(output_filename)

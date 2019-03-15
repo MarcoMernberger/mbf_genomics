@@ -158,7 +158,11 @@ def both_ppg_and_no_ppg(request):
 
             def np():
                 ppg.util.global_pipegraph = None
-                return None
+                class Dummy():
+                    pass
+                d = Dummy
+                d.new_pipegraph = lambda: None
+                return d
 
             def finalize():
                 if hasattr(request.node, "rep_setup"):

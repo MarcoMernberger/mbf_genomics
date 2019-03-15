@@ -408,7 +408,7 @@ class _FastTagCounter(Annotator):
         self.genome = self.aligned_lane.genome
         self.count_strategy = count_strategy
         self.interval_strategy = interval_strategy
-        self.columns = [(column_name % (self.aligned_lane.short_name,)).strip()]
+        self.columns = [(column_name % (self.aligned_lane.name,)).strip()]
         self.cache_name = hashlib.md5(self.columns[0].encode("utf-8")).hexdigest()
         self.column_properties = {self.columns[0]: {"description": column_desc}}
         self.vid = aligned_lane.vid

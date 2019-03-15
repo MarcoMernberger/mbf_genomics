@@ -2,6 +2,8 @@ import pypipegraph as ppg
 import numpy as np
 import pandas as pd
 import pytest
+from pathlib import Path
+from pandas.testing import assert_frame_equal
 from mbf_fileformats.bed import read_bed
 import mbf_genomics.regions as regions
 import mbf_genomics.genes as genes
@@ -707,7 +709,7 @@ class TestGenesLoading:
         assert (introns.df["chr"] == ["1", "1", "1", "1"]).all()
 
 
-@pytest.mark.usefixtures("new_pipegraph")
+@pytest.mark.usefixtures("both_ppg_and_no_ppg")
 class TestGenes:
     def test_write_bed(self):
         genome = MockGenome(
@@ -791,8 +793,12 @@ class TestGenes:
                 ]
             )
         )
-        g = genes.Genes(genome)
-        sample_filename = g.write_bed().job_id  # the jobs output filename
+        g = genes.Genes(genome, sheet_name="da_genes")
+        assert "/da_genes/" in str(g.result_dir)
+        if ppg.util.inside_ppg():
+            sample_filename = g.write_bed().job_id  # the jobs output filename
+        else:
+            sample_filename = g.write_bed()  # the jobs output filename
         run_pipegraph()
         assert len(g.df) > 0
         read = read_bed(sample_filename)
@@ -817,3 +823,314 @@ class TestGenes:
     # g.annotate()
     # run_pipegraph()
     # self.assertTrue((row_names == g.df.row_names).all())
+
+    def test_write(self):
+        g = genes.Genes(get_genome())
+        with pytest.raises(ValueError):
+            g.write(mangler_function=lambda df: df.tail())
+        a = g.write()
+        b = g.write("b.xls")
+        mangle = lambda df: df.head()
+        c = g.write("c.xls", mangle)
+        # this is ok...
+        c = g.write("c.xls", mangle)
+        if ppg.util.inside_ppg():  # this is ok outside of ppg
+            with pytest.raises(ValueError):
+                g.write("c.xls", lambda df: df.tail())
+        run_pipegraph()
+        if ppg.util.inside_ppg():
+            afn = a.job_id
+            bfn = b.job_id
+            cfn = c.job_id
+        else:
+            afn = a
+            bfn = b
+            cfn = c
+        assert Path(afn).exists()
+        assert Path(bfn).exists()
+        assert Path(cfn).exists()
+        assert_frame_equal(pd.read_csv(afn, sep="\t"), pd.read_excel(bfn))
+        assert_frame_equal(
+            pd.read_excel(bfn).head(),
+            pd.read_excel(cfn),
+            check_column_type=False,
+            check_dtype=False,
+        )
+
+    def test_write_filtered(self):
+        g = genes.Genes(get_genome())
+        g2 = g.filter("filtered", lambda df: df.index[:2])
+        g2.write(Path("filtered.xls").absolute())
+        run_pipegraph()
+        assert Path("filtered.xls").exists()
+        df = pd.read_excel("filtered.xls")
+        assert len(df) == 2
+        assert "parent_row" in df.columns
+        assert (df["parent_row"] == [0, 1]).all()
+
+    def test_invalid_chromosomes(self):
+        def a():
+            return pd.DataFrame(
+                {
+                    "chr": "7a",
+                    "start": 100,
+                    "stop": 1000,
+                    "tss": 100,
+                    "tes": 1000,
+                    "strand": 1,
+                    "name": "gene1",
+                    "gene_stable_id": "gene1",
+                },
+                index=["gene1"],
+            )
+
+        genome = get_genome()
+        with RaisesDirectOrInsidePipegraph(ValueError):
+            genes.Genes(
+                genome, alternative_load_func=a, name="my_genes", result_dir="my_genes"
+            ).load()
+
+    def test_invalid_tss(self):
+        def a():
+            return pd.DataFrame(
+                {
+                    "chr": "Chromosome",
+                    "tss": "100",
+                    "tes": 1000,
+                    "strand": 1,
+                    "name": "gene1",
+                    "gene_stable_id": "gene1",
+                },
+                index=["gene1"],
+            )
+
+        genome = get_genome()
+        with RaisesDirectOrInsidePipegraph(ValueError):
+            genes.Genes(
+                genome, alternative_load_func=a, name="my_genes", result_dir="my_genes"
+            ).load()
+
+    def test_invalid_tes(self):
+        def a():
+            return pd.DataFrame(
+                {
+                    "chr": "Chromosome",
+                    "tss": 100,
+                    "tes": 1000.5,
+                    "strand": 1,
+                    "name": "gene1",
+                    "gene_stable_id": "gene1",
+                },
+                index=["gene1"],
+            )
+
+        genome = get_genome()
+        with RaisesDirectOrInsidePipegraph(ValueError):
+            genes.Genes(
+                genome, alternative_load_func=a, name="my_genes", result_dir="my_genes"
+            ).load()
+
+    def test_invalid_start_stop(self):
+        def a():
+            return pd.DataFrame(
+                {
+                    "chr": "Chromosome",
+                    "tss": 100,
+                    "tes": 10,
+                    "start": 100,
+                    "stop": 10,
+                    "strand": 1,
+                    "name": "gene1",
+                    "gene_stable_id": "gene1",
+                },
+                index=["gene1"],
+            )
+
+        genome = get_genome()
+        with RaisesDirectOrInsidePipegraph(ValueError):
+            genes.Genes(
+                genome, alternative_load_func=a, name="my_genes", result_dir="my_genes"
+            ).load()
+
+
+@pytest.mark.usefixtures("new_pipegraph")
+class TestGenesPPG:
+    def test_def_twice_alternative_loading_func(self):
+        def a():
+            return pd.DataFrame(
+                {
+                    "chr": "1",
+                    "start": 100,
+                    "stop": 1000,
+                    "tss": 100,
+                    "tes": 1000,
+                    "strand": 1,
+                    "name": "gene1",
+                    "gene_stable_id": "gene1",
+                },
+                index=["gene1"],
+            )
+
+        def b():
+            return pd.DataFrame(
+                {
+                    "chr": "1",
+                    "start": 110,
+                    "stop": 1000,
+                    "tss": 110,
+                    "tes": 1000,
+                    "strand": 1,
+                    "name": "gene1",
+                    "gene_stable_id": "gene1",
+                },
+                index=["gene1"],
+            )
+
+        genome = MockGenome(
+            pd.DataFrame(
+                [
+                    {
+                        "stable_id": "fake1",
+                        "chr": "1",
+                        "strand": 1,
+                        "tss": 5000,
+                        "tes": 5500,
+                        "description": "bla",
+                    }
+                ]
+            )
+        )
+        gA = genes.Genes(
+            genome, alternative_load_func=a, name="my_genes", result_dir="my_genes"
+        )
+        assert gA.result_dir == Path("my_genes")
+        gA.load()
+        gA.load()
+        with pytest.raises(ValueError):
+            genes.Genes(genome, alternative_load_func=b, name="my_genes")
+
+
+@pytest.mark.usefixtures("both_ppg_and_no_ppg")
+class TestGenesFrom:
+    def test_difference(self):
+        genome = get_genome()
+        a = genes.Genes(genome)
+        b = a.filter("filtered", lambda df: df.index[:5])
+        c = genes.Genes_FromDifference("delta", a, b)
+        force_load(c.load())
+        run_pipegraph()
+        assert len(c.df) == len(a.df) - len(b.df)
+
+    def test_intersection(self):
+        genome = get_genome()
+        a = genes.Genes(genome)
+        b = a.filter("filtered", lambda df: df.index[:5])
+        c = a.filter("filtered2", lambda df: df.index[4:6])
+        with pytest.raises(ValueError):
+            d = genes.Genes_FromIntersection("delta", b, c)
+        d = genes.Genes_FromIntersection("delta", [b, c])
+        force_load(a.load())
+        force_load(d.load())
+        run_pipegraph()
+        assert len(d.df) == 1
+        assert list(d.df.gene_stable_id) == list(a.df.gene_stable_id.loc[4:4])
+
+    def test_intersection(self):
+        genome = get_genome()
+        a = genes.Genes(genome)
+        b = a.filter("filtered", lambda df: df.index[:5], vid='AA')
+        c = b.filter("filtered2", lambda df: df.index[:1], vid=['BB', 'CC'])
+        with pytest.raises(ValueError):
+            d = genes.Genes_FromIntersection("delta", b, c)
+        d = genes.Genes_FromIntersection("delta", [b, c])
+        force_load(a.load())
+        force_load(d.load())
+        run_pipegraph()
+        assert len(d.df) == 1
+        assert list(d.df.gene_stable_id) == list(a.df.gene_stable_id.loc[0:0])
+        assert 'AA' in d.vid
+        assert 'BB' in d.vid
+        assert 'CC' in d.vid
+
+    def test_from_any(self):
+        genome = get_genome()
+        a = genes.Genes(genome)
+        b = a.filter("filtered", lambda df: df.index[:5])
+        c = a.filter("filtered2", lambda df: df.index[-5:])
+        d = a.filter("filtered3", lambda df: df.index[10:15])
+        e = genes.Genes_FromAny("delta", [b, c, d], sheet_name='shu')
+        force_load(e.load())
+        force_load(a.load())
+        run_pipegraph()
+        assert len(e.df) == 15
+        assert sorted(list(e.df.gene_stable_id)) == sorted(list(a.df.gene_stable_id.iloc[:5]) + list(
+            a.df.gene_stable_id.iloc[10:15]
+        ) + list(a.df.gene_stable_id.iloc[-5:]))
+        assert '/shu/' in str(e.result_dir)
+
+    def test_from_all(self):
+        genome = get_genome()
+        a = genes.Genes(genome)
+        b = a.filter("filtered", lambda df: df.index[:5])
+        c = a.filter("filtered2", lambda df: df.index[0:10])
+        d = a.filter("filtered3", lambda df: df.index[3:10])
+        e = genes.Genes_FromAll("delta", [b, c, d])
+        force_load(e.load())
+        force_load(a.load())
+        run_pipegraph()
+        assert len(e.df) == 2
+        assert list(e.df.gene_stable_id) == list(a.df.gene_stable_id.loc[3:4])
+
+    def test_from_none(self):
+        genome = get_genome()
+        a = genes.Genes(genome)
+        b = a.filter("filtered", lambda df: df.index[:5])
+        c = a.filter("filtered2", lambda df: df.index[-5:])
+        d = a.filter("filtered3", lambda df: df.index[3:10])
+        e = genes.Genes_FromNone("delta", [b, c, d])
+        force_load(e.load())
+        force_load(a.load())
+        run_pipegraph()
+        assert len(e.df) == len(a.df) - 5 - 5 - 5
+
+    def test_genes_from_file(self, both_ppg_and_no_ppg):
+        genome = get_genome()
+        a = genes.Genes(genome)
+        b = a.filter("filtered", lambda df: df.index[:5])
+        b.write(Path('filtered.xls').absolute())
+        force_load(b.load())
+        print(both_ppg_and_no_ppg)
+        run_pipegraph()
+        assert not 'summit middle' in a.df.columns
+        assert not 'summit middle' in b.df.columns
+        print(both_ppg_and_no_ppg)
+        both_ppg_and_no_ppg.new_pipegraph()
+        genome = get_genome()
+        c = genes.Genes_FromFile('reimport', genome, Path('filtered.xls').absolute())
+        force_load(c.load())
+        run_pipegraph()
+        assert_frame_equal(b.df, c.df)
+
+    def test_genes_from_file_of_transcripts(self):
+        genome = get_genome()
+        df = pd.DataFrame({'a column!': genome.df_transcripts.index[:5]})
+        df.to_excel("transcripts.xls")
+        a = genes.Genes_FromFileOfTranscripts('my genes', genome, 'transcripts.xls', 'a column!')
+        force_load(a.load())
+        run_pipegraph()
+        assert len(a.df) == 5
+        tr = set()
+        for gene_stable_id in a.df['gene_stable_id']:
+            tr.update(genome.gene(gene_stable_id).transcript_ids)
+        assert tr == set(genome.df_transcripts.index[:5])
+
+    def test_genes_from_biotypes(self):
+        genome = get_genome()
+        nc = ['tRNA','rRNA']
+        non_coding = genes.Genes_FromBiotypes(genome, nc)
+        force_load(non_coding.load())
+        run_pipegraph()
+        assert len(non_coding.df) == genome.df_genes.biotype.isin(nc).sum()
+
+
+  

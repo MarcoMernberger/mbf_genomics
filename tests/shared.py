@@ -51,7 +51,7 @@ def get_genome_chr_length(chr_lengths=None, name=None):
 
 
 def inside_ppg():
-    return ppg.inside_ppg()
+    return ppg.util.inside_ppg()
 
 
 def force_load(job, prefix=None):

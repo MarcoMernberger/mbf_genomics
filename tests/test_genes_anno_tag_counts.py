@@ -137,7 +137,6 @@ class FakePaireEndBam(object):
 class MockLane(object):
     def __init__(self, bam, genome, name="fakelane1"):
         self.name = name
-        self.short_name = name
         self.genome = genome
         self.bam = bam
         self.vid = "FAkeVID"
@@ -1051,11 +1050,11 @@ class TestTPMBiotypes:
         force_load(gr.add_annotator(anno2))
         run_pipegraph()
         df = gr.df.sort_values("gene_stable_id")
-        length_by_gene = anno.interval_strategy.get_interval_lengths_by_gene(genome)
+        # length_by_gene = anno.interval_strategy.get_interval_lengths_by_gene(genome)
         counts = np.array([400, 250.0])
         lengths = [100.0, 250]
         xi = counts / lengths
-        tpms = xi * (1e6 / xi.sum())
+        # tpms = xi * (1e6 / xi.sum())
         assert df[anno2.columns[0]][0] == 1e6
         assert np.isnan(df[anno2.columns[0]][1])
 

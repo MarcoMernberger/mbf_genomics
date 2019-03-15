@@ -9,9 +9,10 @@ def Genes_FromDifference(name, a, b, sheet_name="Differences"):
     """a minus b"""
 
     def do_load(df):
-        remove_ids = set(b.df["stable_id"])
+        remove_ids = set(b.df["gene_stable_id"])
         keep = ~np.array(
-            [stable_id in remove_ids for stable_id in a.df["stable_id"]], dtype=np.bool
+            [stable_id in remove_ids for stable_id in a.df["gene_stable_id"]],
+            dtype=np.bool,
         )
         return keep
 
@@ -37,45 +38,47 @@ def Genes_FromDifference(name, a, b, sheet_name="Differences"):
     return res
 
 
-def Genes_FromIntersection(name, list_of_genes, sheet_name="Intersections"):
+def Genes_FromIntersection(name, gene_sets, sheet_name="Intersections"):
+    if not isinstance(sheet_name, str):
+        raise ValueError(
+            "sheet name must be string - note that Genes_FromIntersection"
+            "takes a list of genes as 2nd parameter"
+        )
     parents = []
-    vid = ["Intersections"]
-    for g in list_of_genes:
-        if g.vid is not None:
-            if isinstance(g.vid, str):
-                vid.append(g.vid)
-            else:
-                vid = vid + g.vid
+    vid = _vid_from_genes_sets(gene_sets, "Intersection")
+    for g in gene_sets:
         parent = g.parent
         while parent.parent:
             parent = parent.parent
         parents.append(parent)
     parent_names = set([x.name for x in parents])
-    if len(parent_names) != 1:
+    if len(parent_names) != 1:  # pragma: no cover
         raise ValueError(
             "Trying to combine gene lists from different parents - currently not supported"
         )
 
     def in_set(df):
         accepted_ids = set.intersection(
-            *[set(g.df["stable_id"]) for g in list_of_genes]
+            *[set(g.df["gene_stable_id"]) for g in gene_sets]
         )
-        return np.array([x in accepted_ids for x in df["stable_id"]], dtype=np.bool)
+        return np.array(
+            [x in accepted_ids for x in df["gene_stable_id"]], dtype=np.bool
+        )
 
     return parents[0].filter(
         name,
         in_set,
-        dependencies=[g.load() for g in list_of_genes],
+        dependencies=[g.load() for g in gene_sets],
         sheet_name=sheet_name,
         vid=vid,
     )
 
 
-def _vid_from_genes_sets(genes_sets, prefix, sheet_name):
+def _vid_from_genes_sets(genes_sets, prefix="filtered", sheet_name=None):
     if sheet_name is not None:
-        vid = [sheet_name]
+        vid = [prefix, sheet_name]
     else:
-        vid = ["filtered"]
+        vid = [prefix]
     for g in genes_sets:
         if g.vid is not None:
             if isinstance(g.vid, str):
@@ -99,8 +102,8 @@ def Genes_FromAny(name, genes_sets, sheet_name=None):
     def do_filter(df):
         seen = set()
         for o in genes_sets:
-            seen.update(genes_sets.df["stable_id"])
-        return np.array([stable_id in seen for stable_id in df["stable_id"]])
+            seen.update(o.df["gene_stable_id"])
+        return np.array([stable_id in seen for stable_id in df["gene_stable_id"]])
 
     return _from_filtered_genes(
         name,
@@ -114,8 +117,10 @@ def Genes_FromAny(name, genes_sets, sheet_name=None):
 def Genes_FromAll(name, genes_sets, sheet_name=None):
     # def filter_to_those_occuring_in_all_filtered_sets(
     def do_filter(df):
-        ok = set.intersection(*[set(o.df["stable_id"].unique()) for o in genes_sets])
-        return np.array([stable_id in ok for stable_id in df["stable_id"]])
+        ok = set.intersection(
+            *[set(o.df["gene_stable_id"].unique()) for o in genes_sets]
+        )
+        return np.array([stable_id in ok for stable_id in df["gene_stable_id"]])
 
     return _from_filtered_genes(
         name,
@@ -131,32 +136,36 @@ def Genes_FromNone(name, genes_sets, sheet_name=None):
     def do_filter(df):
         seen = set()
         for o in genes_sets:
-            seen.update(o.df["stable_id"])
+            seen.update(o.df["gene_stable_id"])
         return np.array(
             ~np.array(
-                [stable_id in seen for stable_id in df["stable_id"]], dtype=np.bool
+                [stable_id in seen for stable_id in df["gene_stable_id"]], dtype=np.bool
             )
         )
-        return _from_filtered_genes(
-            name,
-            do_filter,
-            genes_sets,
-            sheet_name,
-            vid=_vid_from_genes_sets(genes_sets, "filtered", sheet_name),
-        )
+
+    return _from_filtered_genes(
+        name,
+        do_filter,
+        genes_sets,
+        sheet_name,
+        vid=_vid_from_genes_sets(genes_sets, "filtered", sheet_name),
+    )
 
 
 def Genes_FromFile(
-    name, genome, table_filename, column_name="stable_id", sheet_name=None
+    name, genome, table_filename, column_name="gene_stable_id", sheet_name=None
 ):
     """Filter Genes(genome) to those occuring in the table_filename"""
+
+    table_filename = str(table_filename)
 
     def filter(genes_df):
 
         df = read_pandas(table_filename)
         seen = df[column_name].values
-        return np.array([str(x) in seen for x in genes_df["stable_id"]], dtype=np.bool)
-        return genes_df["stable_id"].isin(seen)
+        return np.array(
+            [str(x) in seen for x in genes_df["gene_stable_id"]], dtype=np.bool
+        )
 
     g = Genes(genome)
     if g.load_strategy.build_deps:
@@ -177,19 +186,16 @@ def Genes_FromFileOfTranscripts(
         transcripts = df[column_name]
         seen = set()
         for transcript_stable_id in transcripts:
-            try:
-                seen.add(genome.transcript_to_gene(transcript_stable_id))
-            except KeyError as e:
-                if "masked" in str(e):
-                    continue
-                else:
-                    raise
+            seen.add(genome.transcript(transcript_stable_id).gene_id)
 
-        return np.array([x in seen for x in genes_df["stable_id"]], dtype=np.bool)
+        return np.array([x in seen for x in genes_df["gene_stable_id"]], dtype=np.bool)
 
-    return Genes(genome).filter(
-        name, filter, dependencies=[ppg.FileChecksumInvariant(table_filename)]
-    )
+    g = Genes(genome)
+    if g.load_strategy.build_deps:
+        deps = [ppg.FileChecksumInvariant(table_filename)]
+    else:
+        deps = []
+    return g.filter(name, filter, dependencies=deps)
 
 
 def Genes_FromBiotypes(genome, allowed_biotypes):

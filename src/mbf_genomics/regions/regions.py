@@ -2,6 +2,7 @@ import pypipegraph as ppg
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from collections import Iterator
 
 
 from mbf_genomics.delayeddataframe import DelayedDataFrame
@@ -80,7 +81,14 @@ class GenomicRegions(DelayedDataFrame):
             to raise ValueErrors)
 
         """
-        if not hasattr(dependencies, "__iter__"):
+        if (
+            isinstance(dependencies, str)
+            or not hasattr(dependencies, "__iter__")
+            or (
+                hasattr(dependencies, "__iter__")
+                and isinstance(dependencies, Iterator)
+            )
+        ):
             raise ValueError(
                 "dependencies must be iterable (use [] for no external dependencies"
             )
@@ -114,7 +122,7 @@ class GenomicRegions(DelayedDataFrame):
             or (isinstance(self.on_overlap, tuple) and self.on_overlap[0] == "merge")
         ):
             self.need_to_handle_overlapping_regions = False
-        else:
+        else:  # pragma: no cover - defensive
             raise ValueError(
                 "Don't know how to decide on has_overlapping from %s" % self.on_overlap
             )
@@ -170,11 +178,12 @@ class GenomicRegions(DelayedDataFrame):
         self.random_count = 0
         if summit_annotator:
             self.summit_annotator = summit_annotator
+        elif summit_annotator is False:
+            self.summit_annotator = None
         else:
-
             self.summit_annotator = SummitMiddle()
-
-        self.add_annotator(self.summit_annotator)
+        if self.summit_annotator is not None:
+            self.add_annotator(self.summit_annotator)
         self.register()
         if vid is None:
             vid = []
@@ -251,9 +260,6 @@ class GenomicRegions(DelayedDataFrame):
             if not x in cols:
                 cols.append(x)
         df = df[cols].reset_index(drop=True)
-        if (df.index != np.array(range(len(df)))).any():  # TODO: check for RangeIndex?
-            print(df.index)
-            raise ValueError("df.index was not 0..n")
 
         return df
 
@@ -394,10 +400,11 @@ class GenomicRegions(DelayedDataFrame):
         stop_array = self.df["stop"][chr_start:chr_stop]
         first_start_smaller = np.searchsorted(start_array, start) - 1
         first_end_larger = np.searchsorted(stop_array, stop, "right") + 1
-        if hasattr(first_start_smaller, "__iter__"):
-            first_start_smaller = first_start_smaller[0]
-        if hasattr(first_end_larger, "__iter__"):
-            first_end_larger = first_end_larger[0]
+        #when was this necessary?
+        #if hasattr(first_start_smaller, "__iter__"):
+            #first_start_smaller = first_start_smaller[0]
+        #if hasattr(first_end_larger, "__iter__"):
+            #first_end_larger = first_end_larger[0]
 
         for possible_match in range(
             max(0, first_start_smaller), min(first_end_larger, len(stop_array))
@@ -410,114 +417,6 @@ class GenomicRegions(DelayedDataFrame):
                 return True
         # print 'False3'
         return False
-
-    def has_overlapping_generator(self):
-        """Returns a function that takes (chr, start, stop) in sorted order, and returns self.has_overlapping(...).
-        This is an optimization, in that it exploits that both the queries and the internal storage are sorted,
-        thereby avoiding having to (log) search all intervals on each query.
-
-        No optimizating for genomic regions than need_to_handle_overlapping_regions
-        """
-        gen = self.get_overlapping_generator()
-
-        def call(chr, start, stop, gen=gen):
-            g = gen(chr, start, stop)
-            if (
-                g is True
-            ):  # this is a fairly stupid workaround for the dataframe not being 'false' if it's empty
-                return g
-            elif g is False:
-                return g
-            else:
-                return len(g) != 0
-
-        return call
-
-    def get_overlapping_generator(self):
-        """Returns a function that takes (chr, start, stop) in sorted order, and returns self.has_overlapping(...).
-        This is an optimization, in that it exploits that both the queries and the internal storage are sorted,
-        thereby avoiding having to (log) search all intervals on each query.
-
-        No optimizating for genomic regions than need_to_handle_overlapping_regions
-        """
-        if self.need_to_handle_overlapping_regions:
-
-            class GetOverlappingGeneratorFake(object):
-                """A tiny wrapper so that the overlapping regions in gr case throws the same
-                exception if the order is not kept"""
-
-                def __init__(self, genomic_regions):
-                    self.gr = genomic_regions
-                    self.last_start = 0
-                    self.last_chr = None
-
-                def __call__(self, chr, start, stop):
-                    if chr != self.last_chr:
-                        self.last_chr = chr
-                        self.last_start = 0
-                    if start < self.last_start:
-                        raise ValueError(
-                            "Query sequence was not orderd by ascending start"
-                        )
-                    self.last_start = start
-                    return self.gr.has_overlapping(chr, start, stop)
-
-            return GetOverlappingGeneratorFake(self)
-
-        class GetOverlappingGenerator(object):
-            def __init__(self, genomic_regions):
-                self.gr = genomic_regions
-                self.df = genomic_regions.df
-                self.last_chr = None
-                self.last_start = 0
-
-            def __call__(self, chr, start, stop):
-                if chr != self.last_chr:
-                    self.last_chr = chr
-                    if chr in self.gr.chromosome_intervals:
-                        chr_start, chr_stop = self.gr.chromosome_intervals[chr]
-                        self.start_array = np.array(
-                            self.df["start"][chr_start:chr_stop]
-                        )
-                        self.stop_array = np.array(self.df["stop"][chr_start:chr_stop])
-                        self.current_index = 0
-                        self.stop_index = self.stop_array.shape[0]
-                        self.last_start = 0
-                    elif (
-                        chr in self.gr.genome.get_chromosome_lengths()
-                    ):  # gene less chromosome
-                        self.start_array = np.array((0,), dtype=np.uint32)
-                        self.stop_array = np.array((0,), dtype=np.uint32)
-                        self.current_index = 0
-                        self.stop_index = 0
-                        self.last_start = 0
-                    else:
-                        raise ValueError("Unknown chromosome: %s" % chr)
-                if start < self.last_start:
-                    raise ValueError("Query sequence was not orderd by ascending start")
-                self.last_start = start
-
-                while (
-                    self.current_index < self.stop_index - 1
-                    and self.stop_array[self.current_index] < start
-                ):  # these are not overlapping since their end is to the left of our start...
-                    self.current_index += 1
-                # so, the one at current_index might be the first one overlapping
-                s = max(start, self.start_array[self.current_index])
-                e = min(stop, self.stop_array[self.current_index])
-                if s < e:
-                    chr_start, chr_stop = self.gr.chromosome_intervals[chr]
-                    selected_entries = get_overlapping_interval_indices(
-                        start,
-                        stop,
-                        self.start_array[self.current_index :],
-                        self.stop_array[self.current_index :],
-                    )
-                    return self.df.iloc[[x + chr_start for x in selected_entries]]
-                else:
-                    return self.df.iloc[1:1]
-
-        return GetOverlappingGenerator(self)
 
     def get_overlapping(self, chr, start, stop):
         """Retrieve the rows for the region passed in.
@@ -536,7 +435,7 @@ class GenomicRegions(DelayedDataFrame):
         start_array = np.array(self.df["start"][chr_start:chr_stop])
         stop_array = np.array(self.df["stop"][chr_start:chr_stop])
         selected_entries = get_overlapping_interval_indices(
-            start, stop, start_array, stop_array
+            start, stop, start_array, stop_array, self.need_to_handle_overlapping_regions
         )
         return self.df.iloc[[x + chr_start for x in selected_entries]]
 
@@ -545,38 +444,29 @@ class GenomicRegions(DelayedDataFrame):
         Returns a df with that interval, or an empty df!
         """
         # first we check whether we're on top of a region...
-        overlapping = self.get_overlapping(chr, point, point)
-        if len(overlapping):
-            return overlapping
+        #overlapping = self.get_overlapping(chr, point, point+1)
+        #if len(overlapping):
+            #return overlapping # could be more than one?!
+        try:
+            chr_start, chr_stop = self.chromosome_intervals[chr]
+        except KeyError:
+            return self.df[0:0]  # ie an empty df
+        if chr_stop == chr_start:  # no intervals on this chromosome
+            return self.df[0:0]  # ie an empty df
+        start_array = np.array(self.df["start"][chr_start:chr_stop])
+        stop_array = np.array(self.df["stop"][chr_start:chr_stop])
         if self.need_to_handle_overlapping_regions:
-            raise ValueError(
-                "BX python is currently broken - get_closest only works for non overlapping regions right now"
-            )
-            # previous = self.interval_trees[chr].before(point + 1)
-            # after = self.interval_trees[chr].after(point - 1)
-            # if previous and not after:
-            # return self.df[previous[0].value, :]
-            # elif after and not previous:
-            # return self.df[after[0].value, :]
-            # elif after and previous:
-            # dist_previous = min( abs( point - previous[0].start), abs(point - previous[0].end))
-            # dist_after = min( abs( point - after[0].start), abs(point - after[0].end))
-            # if dist_previous < dist_after:
-            # return self.df[previous[0].value, :]
-            # else:
-            # return self.df[after[0].value, :]
-            # else:
-            # print 'returning empty df for', chr, point, after, previous
-            # return self.df[0:0, :] #ie an empty df
+            #TODO this could use some optimization with a more appropriate data structure
+            distance_to_start = np.abs(start_array - point)
+            distance_to_stop = np.abs(stop_array - point)
+            argmin_start = distance_to_start.argmin()
+            argmin_stop = distance_to_stop.argmin()
+            if distance_to_start[argmin_start] < distance_to_stop[argmin_stop]:
+                return self.df.iloc[chr_start + argmin_start: chr_start + argmin_start + 1]
+            else:
+                return self.df.iloc[chr_start + argmin_stop : chr_start + argmin_stop + 1]
         else:
-            try:
-                chr_start, chr_stop = self.chromosome_intervals[chr]
-            except KeyError:
-                return self.df[0:0]  # ie an empty df
-            if chr_stop == chr_start:  # no intrvals on this chromosome
-                return self.df[0:0]  # ie an empty df
-            start_array = np.array(self.df["start"][chr_start:chr_stop])
-            stop_array = np.array(self.df["stop"][chr_start:chr_stop])
+           
             # now, we already know that there is no overlapping interval... so...
             first_end_smaller = max(
                 0, min(len(stop_array) - 1, np.searchsorted(stop_array, point) - 1)
@@ -647,7 +537,6 @@ class GenomicRegions(DelayedDataFrame):
         self,
         output_filename=None,
         region_name=None,
-        additional_info=False,
         include_header=False,
     ):
         """Store the intervals of the GenomicRegion in a BED file
@@ -660,33 +549,22 @@ class GenomicRegions(DelayedDataFrame):
             bed_entries = []
             for ii, row in self.df.iterrows():
                 if region_name is None:
-                    if additional_info:
-                        entry = BedEntry(
-                            row["chr"],
-                            row["start"],
-                            row["stop"],
-                            strand=row["strand"] if "strand" in row else None,
-                            score=row["score"] if "score" in row else None,
-                            name=row["name"] if "name" in row else None,
-                        )
-                    else:
-                        entry = BedEntry(
-                            row["chr"],
-                            row["start"],
-                            row["stop"],
-                            strand=row["strand"] if "strand" in row else None,
-                        )
+                    def get_name(row):
+                        return None
                 else:
-                    entry = BedEntry(
+                    def get_name(row):
+                        if region_name in row:
+                            return row[region_name]
+                        else:
+                            raise ValueError(
+                            "key: %s not in genomic regions object. These objects are available: %s"
+                            % (region_name, self.df.columns)
+                        )
+                entry = BedEntry(
                         row["chr"],
                         row["start"],
                         row["stop"],
-                        name=row[region_name]
-                        if region_name in row
-                        else ValueError(
-                            "key: %s not in genomic regions object. These objects are available: %s"
-                            % (region_name, self.df.columns)
-                        ),
+                        name=get_name(row),
                         strand=row["strand"] if "strand" in row else None,
                         score=row["score"] if "score" in row else None,
                     )
@@ -769,198 +647,7 @@ class GenomicRegions(DelayedDataFrame):
                 kwargs[k] = getattr(self, k)
         return GenomicRegions(new_name, load_func, deps, genome=self.genome, **kwargs)
 
-    def filter_remove_overlapping(
-        self, new_name, other_gr, summit_annotator=None, sheet_name="Overlaps"
-    ):
-        """Filter all from this GenomicRegions that have an overlapping region in other_gr
-        Note that filtering does not change the coordinates, it only filters,
-        non annotator additional columns are kept, annotators are recalculated.
-        """
-        if other_gr.genome != self.genome:
-            raise ValueError(
-                "Unequal genomes betwen %s %s in filter_remove_overlapping"
-                % (self.name, other_gr.name)
-            )
-
-        def filter_func(df):
-            keep = np.zeros((len(df)), dtype=np.bool)
-            for ii, row in df[["chr", "start", "stop"]].iterrows():
-                keep[ii] = other_gr.has_overlapping(
-                    row["chr"], row["start"], row["stop"]
-                )
-            return ~keep
-
-        if not summit_annotator:
-            summit_annotator = self.summit_annotator
-        if self.load_strategy.build_deps:
-            deps = [
-                other_gr.build_intervals(),
-                ppg.ParameterInvariant(
-                    "GenomicRegions_%s_parents" % new_name, (self.name, other_gr.name)
-                ),  # so if you swap out the gr, it's detected...
-            ]
-        else:
-            other_gr.build_intervals()
-            deps = []
-        return self.filter(
-            new_name,
-            df_filter_function=filter_func,
-            dependencies=deps,
-            summit_annotator=summit_annotator,
-            sheet_name=sheet_name,
-        )
-
-    def filter_remove_overlapping_multiple(
-        self, new_name, other_grs, summit_annotator=None, sheet_name="Overlaps"
-    ):
-        """Filter all from this GenomicRegions that have an overlapping region in other_gr
-        Note that filtering does not change the coordinates, it only filters,
-        non annotator additional rows are kept, annotators are recalculated.
-        """
-        for other_gr in other_grs:
-            if other_gr.genome != self.genome:
-                raise ValueError(
-                    "Unequal genomes betwen %s %s in filter_remove_overlapping"
-                    % (self.name, other_gr.name)
-                )
-
-        def filter_func(df):
-            keep = np.zeros((len(df)), dtype=np.bool)
-            for ii, row in df[["chr", "start", "stop"]].iterrows():
-                for other_gr in other_grs:
-                    keep[ii] = keep[ii] | other_gr.has_overlapping(
-                        row["chr"], row["start"], row["stop"]
-                    )
-            return ~keep
-
-        if not summit_annotator:
-            summit_annotator = self.summit_annotator
-
-        return self.filter(
-            new_name,
-            df_filter_function=filter_func,
-            dependencies=[
-                [x.build_intervals() for x in other_grs],
-                ppg.ParameterInvariant(
-                    "GenomicRegions_%s_parents" % new_name,
-                    (self.name, [x.name for x in other_grs]),
-                ),  # so if you swap out the gr, it's detected...
-            ],
-            summit_annotator=summit_annotator,
-            sheet_name=sheet_name,
-        )
-
-    def filter_remove_overlapping_count(self, other_gr):
-        """Return the length a GenomicRegions that was created via filter_remove_overlapping would have,
-        without actually creating it.... Must have called other_gr.build_intervals() first (and this one must have been loaded)"""
-        if other_gr.genome != self.genome:
-            raise ValueError(
-                "Unequal genomes betwen %s %s in filter_remove_overlapping"
-                % (self.name, other_gr.name)
-            )
-        count = len(self)
-        for ii, row in self.df[["chr", "start", "stop"]].iterrows():
-            if other_gr.has_overlapping(row["chr"], row["start"], row["stop"]):
-                count -= 1
-        return count
-
-    def filter_remove_overlapping_count_multiple(
-        self, other_grs, summit_annotator=None
-    ):
-        """Return the length a GenomicRegions that was created via filter_remove_overlapping_multiple would have,
-        without actually creating it.... Must have called other_gr.build_intervals() first (and this one must have been loaded)"""
-        for other_gr in other_grs:
-            if other_gr.genome != self.genome:
-                raise ValueError(
-                    "Unequal genomes betwen %s %s in filter_remove_overlapping"
-                    % (self.name, other_gr.name)
-                )
-        count = len(self)
-        for ii, row in self.df[["chr", "start", "stop"]].iterrows():
-            for other_gr in other_grs:
-                if other_gr.has_overlapping(row["chr"], row["start"], row["stop"]):
-                    count -= 1
-                    break
-        return count
-
-    def filter_to_overlapping(
-        self, new_name, other_gr, summit_annotator=None, sheet_name=None
-    ):
-        """Filter to just those that overlap one in other_gr.
-        Note that filtering does not change the coordinates, it only filters,
-        non annotator additional rows are kept, annotators are recalculated.
-        """
-        if other_gr.genome != self.genome:
-            raise ValueError(
-                "Unequal genomes betwen %s %s in filter_remove_overlapping"
-                % (self.name, other_gr.name)
-            )
-
-        def filter_func(df):
-            keep = np.zeros((len(df)), dtype=np.bool)
-            for ii, row in df[["chr", "start", "stop"]].iterrows():
-                keep[ii] = other_gr.has_overlapping(
-                    row["chr"], row["start"], row["stop"]
-                )
-            return keep
-
-        if self.load_strategy.build_deps:
-            deps = [
-                other_gr.build_intervals(),
-                ppg.ParameterInvariant(
-                    "GenomicRegions_%s_parents" % new_name, (self.name, other_gr.name)
-                ),  # so if you swap out the gr, it's detected...
-            ]
-        else:
-            other_gr.build_intervals()
-            deps = []
-
-        return self.filter(
-            new_name,
-            df_filter_function=filter_func,
-            dependencies=deps,
-            summit_annotator=summit_annotator,
-            sheet_name=sheet_name,
-        )
-
-    def filter_to_overlapping_multiple(
-        self, new_name, other_grs, summit_annotator=None, sheet_name="Overlaps"
-    ):
-        """Filter to just those that overlap one in *all* other_grs.
-        Note that filtering does not change the coordinates, it only filters,
-        non annotator additional rows are kept, annotators are recalculated.
-        """
-        for other_gr in other_grs:
-            if other_gr.genome != self.genome:
-                raise ValueError(
-                    "Unequal genomes betwen %s %s in filter_remove_overlapping"
-                    % (self.name, other_gr.name)
-                )
-
-        def filter_func(df):
-            keep = np.ones((len(df)), dtype=np.bool)
-            for ii, row in df[["chr", "start", "stop"]].iterrows():
-                for gr in other_grs:
-                    keep[ii] &= gr.has_overlapping(
-                        row["chr"], row["start"], row["stop"]
-                    )
-            return keep
-
-        return self.filter(
-            new_name,
-            df_filter_function=filter_func,
-            dependencies=[other_gr.build_intervals() for other_gr in other_grs]
-            + [
-                ppg.ParameterInvariant(
-                    "GenomicRegions_%s_parents" % new_name,
-                    (self.name, [other_gr.name for other_gr in other_grs]),
-                )  # so if you swap out the gr, it's detected...
-            ],
-            summit_annotator=summit_annotator,
-            sheet_name=sheet_name,
-        )
-
-    def filter_to_overlapping_count(self, other_gr):
+    def __remove_me_fil_er_to_overlapping_count(self, other_gr):
         """Return the length a GenomicRegions that was created via filter_to_overlapping would have,
         without actually creating it.... Must have called other_gr.build_intervals() first (and this one must have been loaded)"""
         if other_gr.genome != self.genome:
@@ -973,43 +660,6 @@ class GenomicRegions(DelayedDataFrame):
             if other_gr.has_overlapping(row["chr"], row["start"], row["stop"]):
                 count += 1
         return count
-
-    # set operations
-    def union(self, new_name, other_gr, summit_annotator=None, add_annotators=True):
-        """Create a union of all intervals in two GR, merging overlapping ones
-        [(10, 100), (400, 450)],
-        [(80, 120), (600, 700)]
-        becomes
-        [(10, 120), (400, 450), (600, 700)]
-
-        Note that all interval-set based operations (L{union}, L{intersection}, L{difference})
-        drop all columns but chr, start, stop (annotators are merged and readded from all sets involved)
-
-        """
-        return self.unions(new_name, [other_gr], summit_annotator, add_annotators)
-
-    def unions(self, new_name, other_grs, summit_annotator=None, add_annotators=True):
-        """Create a union of all intervals in multiple GRs, merging overlapping ones
-        [(10, 100), (400, 450)],
-        [(80, 120), (600, 700)]
-        becomes
-        [(10, 120), (400, 450), (600, 700)]
-
-        Note that all interval-set based operations (L{union}, L{intersection}, L{difference})
-        drop all columns but chr, start, stop (annotators are merged and readded from all sets involved)
-
-        """
-        from .regions_from import GenomicRegions_Union
-
-        parts = [self] + other_grs
-        result = GenomicRegions_Union(
-            new_name, parts, summit_annotator=summit_annotator
-        )
-        if add_annotators:
-            for x in parts:
-                for anno in x.annotators.values():
-                    result += anno
-        return result
 
     def _iter_intersections(self, other_gr):
         """Iterate over (chr, start, stop) tuples of the intersections between this GenomicRegions
@@ -1064,267 +714,12 @@ class GenomicRegions(DelayedDataFrame):
                     jj += 1
         return
 
-    def intersection(
-        self, new_name, other_gr, summit_annotator=None, add_annotators=True
-    ):
-        """Create an intersection of all intervals...
-        [(10, 100), (400, 450)],
-        [(80, 120), (600, 700)]
-        becomes
-        [(80, 100),]
 
-        Note that all interval-set based operations (L{union}, L{intersection}, L{difference})
-        drop all columns but chr, start, stop (annotators are merged and readded from all sets involved)
-        """
-        if self.genome != other_gr.genome:
-            raise ValueError(
-                "GenomicRegions set-operations only work if both have the same genome. You had %s and %s"
-                % (self.genome, other_gr.genome)
-            )
-
-        def do_load():
-            new_rows = []
-            for chr, start, stop in self._iter_intersections(other_gr):
-                new_rows.append({"chr": chr, "start": start, "stop": stop})
-            if new_rows:
-                return pd.DataFrame(new_rows)
-            else:
-                return pd.DataFrame({"chr": [], "start": [], "stop": []})
-
-        if self.load_strategy.build_deps:
-            deps = [
-                other_gr.load(),
-                self.load(),
-                other_gr.build_intervals(),
-                ppg.ParameterInvariant(
-                    "GenomicRegions_%s_parents" % new_name, (self.name, other_gr.name)
-                ),  # so if you swap out the gr, it's detected...
-            ]
-        else:
-            deps = []
-            other_gr.build_intervals()
-
-        result = GenomicRegions(
-            new_name,
-            do_load,
-            deps,
-            self.genome,
-            on_overlap="merge",
-            summit_annotator=summit_annotator,
-            vid=["intersection"] + self.vid + other_gr.vid,
-        )
-        for p in [self, other_gr]:
+    def copy_annotators(self, *other_grs):
+        """Copy annotators from other GRs"""
+        for p in other_grs:
             for anno in p.annotators.values():
-                result += anno
-        return result
-
-    def difference(
-        self, new_name, other_gr, summit_annotator=None, add_annotators=True
-    ):
-        """Create a difference of these intervals wth other_gr's intervalls
-        [(10, 100), (400, 450)],
-        [(80, 120), (600, 700)]
-        becomes
-        [(10, 80), (400, 450)]
-        (intervals may be split up!)
-
-        Note that all interval-set based operations (L{union}, L{intersection}, L{difference})
-        drop all columns but chr, start, stop (annotators are merged and readded from all sets involved)
-        """
-        if self.genome != other_gr.genome:
-            raise ValueError(
-                "GenomicRegions set-operations only work if both have the same genome. You had %s and %s"
-                % (self.genome, other_gr.genome)
-            )
-
-        def do_load():
-            new_rows = []
-            for idx, row in self.df[["chr", "start", "stop"]].iterrows():
-                overlaps = other_gr.get_overlapping(
-                    row["chr"], row["start"], row["stop"]
-                )
-                if not len(overlaps):  # the easy case...
-                    new_rows.append(row)
-                else:
-                    overlaps = self.merge_intervals(
-                        overlaps
-                    )  # they are now also sorted, so all we need to do is walk them, keep the regions between them (and within the original interval)
-                    start = row["start"]
-                    if (
-                        overlaps.at[0, "start"] <= start
-                        and overlaps.at[0, "stop"] > start
-                    ):
-                        start_i = 1
-                        start = overlaps.at[0, "stop"]
-                    else:
-                        start_i = 0
-                    for ii in range(start_i, len(overlaps)):
-                        stop = min(overlaps.at[ii, "start"], row["stop"])
-                        new_rows.append(
-                            {"chr": row["chr"], "start": start, "stop": stop}
-                        )
-                        start = overlaps.at[ii, "stop"]
-                    if start < row["stop"]:
-                        new_rows.append(
-                            {"chr": row["chr"], "start": start, "stop": row["stop"]}
-                        )
-
-                    # todo: work the cutting up magic!
-                    pass
-            if new_rows:
-                return pd.DataFrame(new_rows)
-            else:
-                return pd.DataFrame({"chr": [], "start": [], "stop": []})
-
-        if self.load_strategy.build_deps:
-            deps = [
-                other_gr.load(),
-                self.load(),
-                other_gr.build_intervals(),
-                ppg.ParameterInvariant(
-                    "GenomicRegions_%s_parents" % new_name, (self.name, other_gr.name)
-                ),  # so if you swap out the gr, it's detected...
-            ]
-        else:
-            other_gr.build_intervals()
-            deps = []
-
-        result = GenomicRegions(
-            new_name,
-            do_load,
-            deps,
-            self.genome,
-            on_overlap="merge",
-            summit_annotator=summit_annotator,
-            vid=["difference"] + list(self.vid) + list(other_gr.vid),
-        )
-        if add_annotators:
-            for p in self, other_gr:
-                for anno in p.annotators.values():
-                    result += anno
-        return result
-
-    def overlapping(
-        self, new_name, other_gr, summit_annotator=None, add_annotators=True
-    ):
-        """Create an union of all intersecting intervals...
-        Basically, if intervals overlap, keep their union, if they don't have a partner, drop them
-        [(10, 100), (400, 450)],
-        [(80, 120), (600, 700)]
-        becomes
-        [(10, 120),]
-        """
-        if self.genome != other_gr.genome:
-            raise ValueError(
-                "GenomicRegions set-operations only work if both have the same genome. You had %s and %s"
-                % (self.genome, other_gr.genome)
-            )
-
-        def do_load():
-            new_rows = []
-            for dummy_idx, row in self.df[["chr", "start", "stop"]].iterrows():
-                overlaps = other_gr.get_overlapping(
-                    row["chr"], row["start"], row["stop"]
-                )
-                if not len(overlaps):  # the easy case...
-                    pass  # no overlap, no intersection, no new region!
-                else:
-                    overlaps = self.merge_intervals(overlaps)
-                    start = min(row["start"], (np.min(overlaps["start"])))
-                    stop = max(row["stop"], (np.max(overlaps["stop"])))
-                    new_rows.append({"chr": row["chr"], "start": start, "stop": stop})
-            if new_rows:
-                return pd.DataFrame(new_rows)
-            else:
-                return pd.DataFrame({"chr": [], "start": [], "stop": []})
-
-        if self.load_strategy.build_deps:
-            deps = [
-                other_gr.load(),
-                self.load(),
-                other_gr.build_intervals(),
-                ppg.ParameterInvariant(
-                    "GenomicRegions_%s_parents" % new_name, (self.name, other_gr.name)
-                ),  # so if you swap out the gr, it's detected...
-            ]
-        else:
-            deps = []
-            other_gr.build_intervals()
-
-        result = GenomicRegions(
-            new_name,
-            do_load,
-            deps,
-            self.genome,
-            on_overlap="merge",
-            summit_annotator=summit_annotator,
-            vid=["overlapping"] + self.vid + other_gr.vid,
-        )
-        if add_annotators:
-            for p in [self, other_gr]:
-                for anno in p.annotators.values():
-                    result += anno
-        return result
-
-    def invert(self, new_name, summit_annotator=None, add_annotators=True):
-        """Invert a GenomicRegions. What was covered becomes uncovered, what was uncovered becomes covered.
-        [(10, 100), (400, 450)], in a chromosome of size 1000
-        becomes
-        [(0, 10), (450, 1000)]
-
-        Note that all interval-set based operations (L{union}, L{intersection}, L{difference})
-        drop all columns but chr, start, stop (annotators are merged and readded from all sets involved)
-        """
-
-        def do_load():
-            new_rows = []
-            chr_lens = self.genome.get_chromosome_lengths()
-            chrs_covered = set()
-            # for chr, rows in itertools.groupby(self.df[['chr', 'start','stop']].iterrows(), lambda row: row['chr']):
-            for chr, rows in self.df[["chr", "start", "stop"]].groupby("chr"):
-                chrs_covered.add(chr)
-                start = 0
-                for dummy_idx, row in rows.iterrows():
-                    if start != row["start"]:
-                        new_rows.append(
-                            {"chr": chr, "start": start, "stop": row["start"]}
-                        )
-                    start = row["stop"]
-                if start < chr_lens[chr]:
-                    new_rows.append({"chr": chr, "start": start, "stop": chr_lens[chr]})
-            for (
-                chr
-            ) in (
-                chr_lens
-            ):  # we need to cover chromosomes that did not have a single entry so far.
-                if not chr in chrs_covered:
-                    new_rows.append({"chr": chr, "start": 0, "stop": chr_lens[chr]})
-            return pd.DataFrame(new_rows)
-
-        if self.load_strategy.build_deps:
-            deps = [
-                self.load(),
-                ppg.ParameterInvariant(
-                    "GenomicRegions_%s_parents" % new_name, (self.name)
-                ),  # so if you swap out the gr, it's detected...
-            ]
-        else:
-            deps = []
-
-        result = GenomicRegions(
-            new_name,
-            do_load,
-            deps,
-            self.genome,
-            on_overlap="merge",
-            summit_annotator=summit_annotator,
-            vid=["invert"] + self.vid,
-        )
-        if add_annotators:
-            for p in [self]:
-                for anno in p.annotators.values():
-                    result += anno
-        return result
+                self += anno
 
     # overlap calculations
     def overlap_basepair(
@@ -1388,8 +783,6 @@ class GenomicRegions(DelayedDataFrame):
             a = self.df[self.df.chr == chrom][["start", "stop"]].assign(color=1)
             b = other_gr.df[other_gr.df.chr == chrom][["start", "stop"]].assign(color=2)
             comb = pd.concat([a, b]).sort_values("start")
-            if len(comb):
-                print(chrom, comb)
             last_stop = 0
             run_start = -1
             run_colors = 0
@@ -1453,8 +846,13 @@ class GenomicRegions(DelayedDataFrame):
 
         @conversion_function is passed the dataframe, and must return one containing
         at least (chr, start, stop).
-        @conversion_function may be a tuple (function, [annotators]), in which case the function is treated as conversion_function and the annotators are added as dependencies
-        @conversion_function may be a tuple (function, [annotators], parameters), in which case the function is treated as conversion_function and the annotators are added as dependencies, and an additional parameter_dependency is added
+        @conversion_function may be a tuple (function, [annotators]), 
+            in which case the function is treated as conversion_function 
+            and the annotators are added as dependencies
+        @conversion_function may be a tuple (function, [annotators], parameters), 
+            in which case the function is treated as conversion_function and the 
+            annotators are added as dependencies, 
+            and an additional parameter_dependency is added
         @dependencies must be a list of jobs
         """
         if not isinstance(new_name, str):
@@ -1511,7 +909,7 @@ class GenomicRegions(DelayedDataFrame):
             deps = []
         if hasattr(conversion_function, "dependencies"):
             deps.extend(conversion_function.dependencies)
-        if summit_annotator is None:
+        if summit_annotator is None: # pragma: no cover
             summit_annotator = self.summit_annotator
         return GenomicRegions(
             new_name,
