@@ -173,7 +173,7 @@ class Genes(GenomicRegions):
             for chr in df["chr"]:
                 if not chr in allowed_chromosomes:
                     raise ValueError(
-                        "Invalid chromosome found when loading %s: %s, expected one of: %s\nLoading func was %s"
+                        "Invalid chromosome found when loading %s: '%s', expected one of: %s\nLoading func was %s"
                         % (
                             self.name,
                             chr,
