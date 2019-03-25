@@ -9,12 +9,37 @@ from mbf_genomics.delayeddataframe import DelayedDataFrame
 from mbf_genomes import GenomeBase
 from mbf_externals.util import lazy_property
 from .annotators import SummitMiddle
-from mbf_genomes.intervals import (
-    merge_intervals,
-    merge_intervals_with_callback,
-    merge_identical,
-    get_overlapping_interval_indices,
-)
+from mbf_genomes.intervals import merge_intervals, merge_intervals_with_callback
+
+
+def merge_identical(sub_df):
+    if (len(sub_df["start"].unique()) != 1) or (len(sub_df["stop"].unique()) != 1):
+        raise ValueError(
+            "Overlapping intervals: %s, merge_identical was set." % (sub_df,)
+        )
+    return sub_df.iloc[0].to_dict()
+
+
+def get_overlapping_interval_indices(
+    start, stop, start_array, stop_array, handle_overlapping
+):
+    """Return the indices of all intervals stored in start_array, stop_array that overlap start, stop"""
+    # TODO: replace with better algorithm - e.g. rustbio intervl trees
+    if not handle_overlapping:
+        first_start_smaller = np.searchsorted(start_array, start) - 1
+        first_end_larger = np.searchsorted(stop_array, stop, "right") + 1
+    else:
+        first_start_smaller = 0
+        first_end_larger = len(stop_array)
+    result = []
+    for possible_match in range(
+        max(0, first_start_smaller), min(first_end_larger, len(stop_array))
+    ):
+        s = max(start, start_array[possible_match])
+        e = min(stop, stop_array[possible_match])
+        if s < e:
+            result.append(possible_match)
+    return result
 
 
 region_registry = {}
@@ -85,8 +110,7 @@ class GenomicRegions(DelayedDataFrame):
             isinstance(dependencies, str)
             or not hasattr(dependencies, "__iter__")
             or (
-                hasattr(dependencies, "__iter__")
-                and isinstance(dependencies, Iterator)
+                hasattr(dependencies, "__iter__") and isinstance(dependencies, Iterator)
             )
         ):
             raise ValueError(
@@ -400,11 +424,11 @@ class GenomicRegions(DelayedDataFrame):
         stop_array = self.df["stop"][chr_start:chr_stop]
         first_start_smaller = np.searchsorted(start_array, start) - 1
         first_end_larger = np.searchsorted(stop_array, stop, "right") + 1
-        #when was this necessary?
-        #if hasattr(first_start_smaller, "__iter__"):
-            #first_start_smaller = first_start_smaller[0]
-        #if hasattr(first_end_larger, "__iter__"):
-            #first_end_larger = first_end_larger[0]
+        # when was this necessary?
+        # if hasattr(first_start_smaller, "__iter__"):
+        # first_start_smaller = first_start_smaller[0]
+        # if hasattr(first_end_larger, "__iter__"):
+        # first_end_larger = first_end_larger[0]
 
         for possible_match in range(
             max(0, first_start_smaller), min(first_end_larger, len(stop_array))
@@ -435,7 +459,11 @@ class GenomicRegions(DelayedDataFrame):
         start_array = np.array(self.df["start"][chr_start:chr_stop])
         stop_array = np.array(self.df["stop"][chr_start:chr_stop])
         selected_entries = get_overlapping_interval_indices(
-            start, stop, start_array, stop_array, self.need_to_handle_overlapping_regions
+            start,
+            stop,
+            start_array,
+            stop_array,
+            self.need_to_handle_overlapping_regions,
         )
         return self.df.iloc[[x + chr_start for x in selected_entries]]
 
@@ -444,9 +472,9 @@ class GenomicRegions(DelayedDataFrame):
         Returns a df with that interval, or an empty df!
         """
         # first we check whether we're on top of a region...
-        #overlapping = self.get_overlapping(chr, point, point+1)
-        #if len(overlapping):
-            #return overlapping # could be more than one?!
+        # overlapping = self.get_overlapping(chr, point, point+1)
+        # if len(overlapping):
+        # return overlapping # could be more than one?!
         try:
             chr_start, chr_stop = self.chromosome_intervals[chr]
         except KeyError:
@@ -456,17 +484,21 @@ class GenomicRegions(DelayedDataFrame):
         start_array = np.array(self.df["start"][chr_start:chr_stop])
         stop_array = np.array(self.df["stop"][chr_start:chr_stop])
         if self.need_to_handle_overlapping_regions:
-            #TODO this could use some optimization with a more appropriate data structure
+            # TODO this could use some optimization with a more appropriate data structure
             distance_to_start = np.abs(start_array - point)
             distance_to_stop = np.abs(stop_array - point)
             argmin_start = distance_to_start.argmin()
             argmin_stop = distance_to_stop.argmin()
             if distance_to_start[argmin_start] < distance_to_stop[argmin_stop]:
-                return self.df.iloc[chr_start + argmin_start: chr_start + argmin_start + 1]
+                return self.df.iloc[
+                    chr_start + argmin_start : chr_start + argmin_start + 1
+                ]
             else:
-                return self.df.iloc[chr_start + argmin_stop : chr_start + argmin_stop + 1]
+                return self.df.iloc[
+                    chr_start + argmin_stop : chr_start + argmin_stop + 1
+                ]
         else:
-           
+
             # now, we already know that there is no overlapping interval... so...
             first_end_smaller = max(
                 0, min(len(stop_array) - 1, np.searchsorted(stop_array, point) - 1)
@@ -533,12 +565,7 @@ class GenomicRegions(DelayedDataFrame):
 
     # output functions
 
-    def write_bed(
-        self,
-        output_filename=None,
-        region_name=None,
-        include_header=False,
-    ):
+    def write_bed(self, output_filename=None, region_name=None, include_header=False):
         """Store the intervals of the GenomicRegion in a BED file
         @region_name: Insert the column of the GenomicRegions-Object e.g. 'repeat_name'"""
         from mbf_fileformats.bed import BedEntry, write_bed
@@ -549,25 +576,29 @@ class GenomicRegions(DelayedDataFrame):
             bed_entries = []
             for ii, row in self.df.iterrows():
                 if region_name is None:
+
                     def get_name(row):
                         return None
+
                 else:
+
                     def get_name(row):
                         if region_name in row:
                             return row[region_name]
                         else:
                             raise ValueError(
-                            "key: %s not in genomic regions object. These objects are available: %s"
-                            % (region_name, self.df.columns)
-                        )
+                                "key: %s not in genomic regions object. These objects are available: %s"
+                                % (region_name, self.df.columns)
+                            )
+
                 entry = BedEntry(
-                        row["chr"],
-                        row["start"],
-                        row["stop"],
-                        name=get_name(row),
-                        strand=row["strand"] if "strand" in row else None,
-                        score=row["score"] if "score" in row else None,
-                    )
+                    row["chr"],
+                    row["start"],
+                    row["stop"],
+                    name=get_name(row),
+                    strand=row["strand"] if "strand" in row else None,
+                    score=row["score"] if "score" in row else None,
+                )
                 bed_entries.append(entry)
             write_bed(
                 output_filename,
@@ -713,7 +744,6 @@ class GenomicRegions(DelayedDataFrame):
                 else:
                     jj += 1
         return
-
 
     def copy_annotators(self, *other_grs):
         """Copy annotators from other GRs"""
@@ -909,7 +939,7 @@ class GenomicRegions(DelayedDataFrame):
             deps = []
         if hasattr(conversion_function, "dependencies"):
             deps.extend(conversion_function.dependencies)
-        if summit_annotator is None: # pragma: no cover
+        if summit_annotator is None:  # pragma: no cover
             summit_annotator = self.summit_annotator
         return GenomicRegions(
             new_name,
