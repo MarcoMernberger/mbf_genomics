@@ -304,7 +304,7 @@ class Genes(GenomicRegions):
                     not transcript_row["chr"] in canonical_chromosomes
                 ):  # pragma: no cover
                     continue
-                tr = self.genome.transcript(transcript_stable_id)
+                tr = self.genome.transcripts[transcript_stable_id]
                 introns = tr.introns
                 cardinality = 0
                 for start, stop in introns:

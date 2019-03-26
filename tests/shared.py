@@ -18,7 +18,7 @@ def get_genome(name=None):
         old_pipegraph = ppg.util.global_pipegraph
         ppg.new_pipegraph()
         g = get_Candidatus_carsonella_ruddii_pv(
-            name, cache_dir=cache_dir, ignore_code_changes=True
+            name, cache_dir=cache_dir  # , ignore_code_changes=True
         )
         g.download_genome()
         # g.job_genes()
@@ -202,6 +202,10 @@ def MockGenome(df_genes, df_transcripts=None, chr_lengths=None):
         df_genes = df_genes.assign(start=starts, stop=stops)
     if not "biotype" in df_genes.columns:
         df_genes = df_genes.assign(biotype="protein_coding")
+    if not "name" in df_genes.columns:
+            df_genes = df_genes.assign(
+                name=df_genes.gene_stable_id
+            )
     df_genes = df_genes.sort_values(["chr", "start"])
     df_genes = df_genes.set_index("gene_stable_id")
     if not df_genes.index.is_unique:
@@ -214,11 +218,21 @@ def MockGenome(df_genes, df_transcripts=None, chr_lengths=None):
             )
         if not "biotype" in df_transcripts.columns:
             df_transcripts = df_transcripts.assign(biotype="protein_coding")
+        if not "name" in df_transcripts.columns:
+            df_transcripts = df_transcripts.assign(
+                name=df_transcripts.transcript_stable_id
+            )
         if "exons" in df_transcripts.columns:
             if len(df_transcripts["exons"].iloc[0]) == 3:
                 df_transcripts = df_transcripts.assign(
                     exons=[(x[0], x[1]) for x in df_transcripts["exons"]]
                 )
+            df_transcripts = df_transcripts.assign(
+                exon_stable_ids=[
+                    "exon_%s_%i" % (idx, ii)
+                    for (ii, idx) in enumerate(df_transcripts["exons"])
+                ]
+            )
         stops = []
         if not "strand" in df_transcripts:
             df_transcripts = df_transcripts.assign(strand=1)

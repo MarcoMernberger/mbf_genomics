@@ -343,7 +343,7 @@ class IntervalStrategyExon(_IntervalStrategy):
 
 def get_all_gene_exons_protein_coding(genome):
     result = []
-    for g in genome.genes:
+    for g in genome.genes.values():
         exons = g.exons_protein_coding_merged
         exons = exons.assign(gene_stable_id=g.gene_stable_id)
         result.append(exons)

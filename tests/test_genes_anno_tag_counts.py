@@ -401,7 +401,7 @@ class TestExonSmartCount:
         run_pipegraph()
         df = genes.df.sort_values("name")
         print(df)
-        print(genome.gene("FakeA").exons_protein_coding_overlapping)
+        print(genome.genes["FakeA"].exons_protein_coding_overlapping)
         assert (df[anno.columns[0]] == np.array([300, (100 + 150) * 3])).all()
 
     def test_stranded(self):
@@ -691,6 +691,7 @@ class TestCPM:
                     "tss": 0,
                     "tes": 2000,
                     "chr": "1",
+                    'strand': 1,
                 },
                 {
                     "gene_stable_id": "FakeB",
@@ -698,6 +699,7 @@ class TestCPM:
                     "tss": 4000,
                     "tes": 2000,
                     "chr": "1",
+                    'strand': -1,
                 },
             ]
         )
@@ -746,6 +748,7 @@ class TestCPM:
         force_load(gr.add_annotator(anno2))
         run_pipegraph()
         df = gr.df.sort_values("gene_stable_id")
+        assert (df[anno.columns[0]] == np.array([100 * 4, (250) * 1])).all()
         assert (
             df[anno2.columns[0]] == np.array([400 * 1e6 / 650.0, 250 * 1e6 / 650.0])
         ).all()
@@ -764,6 +767,7 @@ class TestTPM:
                     "tss": 0,
                     "tes": 2000,
                     "chr": "1",
+                    'strand': 1,
                 },  # length: 1000
                 {
                     "gene_stable_id": "FakeB",
@@ -771,6 +775,7 @@ class TestTPM:
                     "tss": 4000,
                     "tes": 2000,
                     "chr": "1",
+                    'strand': -1,
                 },  # length 2000
             ]
         )
@@ -843,6 +848,7 @@ class TestCPMBiotypes:
                     "tes": 2000,
                     "chr": "1",
                     "biotype": "protein_coding",
+                    'strand': 1,
                 },
                 {
                     "gene_stable_id": "FakeB",
@@ -851,6 +857,7 @@ class TestCPMBiotypes:
                     "tes": 2000,
                     "chr": "1",
                     "biotype": "misc_RNA",
+                    'strand': -1,
                 },
             ]
         )
@@ -915,6 +922,7 @@ class TestCPMBiotypes:
                     "tes": 2000,
                     "chr": "1",
                     "biotype": "protein_coding",
+                    'strand': 1,
                 },
                 {
                     "gene_stable_id": "FakeB",
@@ -923,6 +931,7 @@ class TestCPMBiotypes:
                     "tes": 2000,
                     "chr": "1",
                     "biotype": "misc_RNA",
+                    'strand': -1,
                 },
             ]
         )
@@ -993,6 +1002,7 @@ class TestTPMBiotypes:
                     "tes": 2000,
                     "chr": "1",
                     "biotype": "protein_coding",
+                    'strand': 1,
                 },
                 {
                     "gene_stable_id": "FakeB",
@@ -1001,6 +1011,7 @@ class TestTPMBiotypes:
                     "tes": 2000,
                     "chr": "1",
                     "biotype": "misc_RNA",
+                    'strand': -1,
                 },
             ]
         )
@@ -1070,6 +1081,7 @@ class TestTPMBiotypes:
                     "tes": 2000,
                     "chr": "1",
                     "biotype": "protein_coding",
+                    'strand': 1,
                 },
                 {
                     "gene_stable_id": "FakeB",
@@ -1078,6 +1090,7 @@ class TestTPMBiotypes:
                     "tes": 2000,
                     "chr": "1",
                     "biotype": "misc_RNA",
+                    'strand': -1,
                 },
             ]
         )

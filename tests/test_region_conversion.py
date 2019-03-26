@@ -125,9 +125,13 @@ class TestGenomicRegionConvertTests:
         assert len(g.df) == len(b.df)
         assert "strand" in b.df.columns
         # we have to go by index - the order might change
-        b_df = b.df.set_index("gene_stable_id")
-        g_df = g.df.set_index("gene_stable_id")
+        #convert to list of strings - bug in at it won't work otherwise
+        b_df = b.df.assign(gene_stable_id=[x for x in b.df.gene_stable_id])
+        g_df = g.df.assign(gene_stable_id=[x for x in g.df.gene_stable_id])
+        b_df = b_df.set_index("gene_stable_id")
+        g_df = g_df.set_index("gene_stable_id")
         assert set(b_df.index) == set(g_df.index)
+
         for ii in b_df.index:
             if g_df.at[ii, "strand"] == 1:
                 assert b_df.at[ii, "start"] == max(0, g_df.at[ii, "tss"] - 444)

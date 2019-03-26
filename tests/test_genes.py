@@ -1121,7 +1121,7 @@ class TestGenesFrom:
         assert len(a.df) == 5
         tr = set()
         for gene_stable_id in a.df['gene_stable_id']:
-            tr.update(genome.gene(gene_stable_id).transcript_ids)
+            tr.update([tr.transcript_stable_id for tr in genome.genes[gene_stable_id].transcripts])
         assert tr == set(genome.df_transcripts.index[:5])
 
     def test_genes_from_biotypes(self):

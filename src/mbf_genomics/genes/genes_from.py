@@ -186,7 +186,7 @@ def Genes_FromFileOfTranscripts(
         transcripts = df[column_name]
         seen = set()
         for transcript_stable_id in transcripts:
-            seen.add(genome.transcript(transcript_stable_id).gene_id)
+            seen.add(genome.transcripts[transcript_stable_id].gene_stable_id)
 
         return np.array([x in seen for x in genes_df["gene_stable_id"]], dtype=np.bool)
 
