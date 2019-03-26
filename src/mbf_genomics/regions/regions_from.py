@@ -215,31 +215,13 @@ def GenomicRegions_FromBigBed(
     @chromosome_mangler translates genome chromosomes into the bigbed's chromosomes!
 
     """
-    import pyBigWig
+    from mbf_fileformats.bed import read_bigbed
 
     if chromosome_mangler is None:
         chromosome_mangler = lambda x: x  # noqa:E731
 
     def load():
-        data = {"chr": [], "start": [], "stop": [], "strand": []}
-        bb = pyBigWig.open(filename)
-        chr_lengths = genome.get_chromosome_lengths()
-        for chr in chr_lengths:
-            it = bb.entries(chromosome_mangler(chr), 0, chr_lengths[chr])
-            if (
-                it is None
-            ):  # no such chromosome. Tolerable if it's a contig or such. If none of the chromosome names match, we raise later because of an empty big file.
-                continue
-            for entry in it:
-                data["chr"].append(chr)
-                data["start"].append(entry.start)
-                data["stop"].append(entry.end)
-                data["strand"].append(
-                    1 if entry.strand == "+" else -1 if entry.strand == "-" else 0
-                )
-        bb.close()
-
-        res = pd.DataFrame(data)
+        res = read_bigbed(filename, genome.get_chromosome_lengths(), chromosome_mangler)
         if (res["strand"] == 1).all():
             res = res.drop("strand", axis=1)
         if len(res) == 0:

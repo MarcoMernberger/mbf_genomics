@@ -50,27 +50,6 @@ def promotorize(basepairs=1250):
 
     return do_promotorize, [], basepairs
 
-
-def promotorize_trna(basepairs=1250):
-    """Genes.convert - returns [-basepairs...start] regions
-    it is the promotorize function from above but works with 'start' instead of 'tss',
-    especially good to promotorize rRNA and tRNA regions imported via rnaseq/datasets.py"""
-
-    def do_promotorize(df):
-        res = {"chr": df["chr"]}
-        res["start"] = np.zeros((len(df),), dtype=np.int32)
-        res["stop"] = np.zeros((len(df),), dtype=np.int32)
-        forward = df["strand"] == 1
-        res["start"][:] = df["start"]  # Assign within array.
-        res["stop"][:] = df["start"]  # Assign within array.
-        res["start"][forward] -= basepairs
-        res["start"][res["start"] < 0] = 0
-        res["stop"][~forward] += basepairs
-        return pd.DataFrame(res)
-
-    return do_promotorize, [], basepairs
-
-
 def shift(basepairs):
     def do_shift(df):
         res = {
@@ -136,7 +115,7 @@ def merge_connected():
                 last_stop = stops[ii]
             last_row = ii
             ii += 1
-        if last_row is not None:
+        if last_row is not None: # pragma: no branch
             keep[last_row] = True
             # new_rows.append(df.get_row(last_row))
         # return pd.DataFrame(new_rows)
@@ -164,9 +143,6 @@ class LiftOver(object):
         strip_chr = False
         listOfChromosomeIntervals = [list(row) for row in listOfChromosomeIntervals]
         for row in listOfChromosomeIntervals:
-            if not row[0].startswith("chr"):
-                row[0] = "chr" + row[0]
-                strip_chr = True
             tmp_input.write(b" ".join(to_bytes(str(x)) for x in row))
             tmp_input.write(b"\n")
             max_len = max(len(row), max_len)
@@ -181,7 +157,7 @@ class LiftOver(object):
         ]
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         dummy_stdout, stderr = p.communicate()
-        if p.returncode != 0:
+        if p.returncode != 0: # pragma: no cover
             raise ValueError(
                 "do_liftover failed. Returncode: %s, stderr: %s"
                 % (p.returncode, stderr)
@@ -190,8 +166,6 @@ class LiftOver(object):
         res = []
         for row in tmp_output_in:
             row = row.strip().split(b"\t")
-            if strip_chr:
-                row[0] = row[0][3:]
             row[0] = to_string(row[0])
             row[1] = int(row[1])
             row[2] = int(row[2])
@@ -204,8 +178,9 @@ class LiftOver(object):
         return res
 
     def get_convert_func(self, key, keep_name=False, filter_to_these_chromosomes=None):
+        """Note that filter_to_these_chromosomes is after the replacements have kicked in"""
         chain_file = self.data_path / (key + ".over.chain")
-        if not chain_file.exists():
+        if not chain_file.exists(): # pragma: no cover
             raise ValueError("invalid liftover key, file not found: %s" % chain_file)
         if filter_to_these_chromosomes:
             filter_to_these_chromosomes = set(filter_to_these_chromosomes)
@@ -231,7 +206,7 @@ class LiftOver(object):
                 }
             )
             if keep_name:
-                res = res.assign(name=output_lists[3])
+                res = res.assign(name=[x.decode('utf-8') for x in output_lists[3]])
             new_chr = []
             for x in res["chr"]:
                 x = x[3:]
@@ -257,10 +232,12 @@ class LiftOver(object):
         return do_convert
 
 
-def hg19_to_hg38(filter_to_these_chromosomes=None):
+def hg19_to_hg38(keep_name=False, filter_to_these_chromosomes=None):
     """Map a human genome 19 genomic regions into hg 38(=grch38)"""
     return LiftOver().get_convert_func(
-        "hg19ToHg38", filter_to_these_chromosomes=filter_to_these_chromosomes
+        "hg19ToHg38", 
+        keep_name=keep_name,
+        filter_to_these_chromosomes=filter_to_these_chromosomes
     )
 
 
@@ -377,7 +354,7 @@ def cookie_summit_alternative_column_name(
     summit_annotator,
     bp,
     drop_those_outside_chromosomes=False,
-    alternative_column_name=None,
+    #alternative_column_name=None,
 ):
     """ transform all their binding regions to -1/2 * bp ... 1/2 * bp centered
     around the summit (so pass in the final size of the region)
@@ -387,8 +364,8 @@ def cookie_summit_alternative_column_name(
 
     def do_summits(df):
         summit_col = summit_annotator.column_name
-        if alternative_column_name is not None:
-            summit_col = alternative_column_name
+        #if alternative_column_name is not None: # pragma: no cover - not sure when this is needd at all?
+            #summit_col = alternative_column_name
         res = {
             "chr": df["chr"],
             "start": df["start"] + df[summit_col] - bp / 2,

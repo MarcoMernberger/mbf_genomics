@@ -889,7 +889,7 @@ class TestGenomicRegionsWriting:
                     "chr": ["1", "2", "1", "3", "5"],
                     "start": [10, 100, 1000, 10000, 100_000],
                     "stop": [11, 110, 1110, 11110, 111_110],
-                    'name': ['a','b','c','d','e']
+                    "name": ["a", "b", "c", "d", "e"],
                 }
             )
 
@@ -924,14 +924,13 @@ class TestGenomicRegionsWriting:
         assert read[2].length == 10
         assert read[3].length == 1110
         assert read[4].length == 11110
-        assert read[0].name == b'Noname'
+        assert read[0].name == b"Noname"
 
     def test_write_bed_with_name(self):
         self.setUp()
         from mbf_fileformats.bed import read_bed
 
-        self.a.write_bed(self.sample_filename,
-                         region_name='name')
+        self.a.write_bed(self.sample_filename, region_name="name")
         run_pipegraph()
         assert len(self.a.df) > 0
         read = read_bed(self.sample_filename)
@@ -951,11 +950,34 @@ class TestGenomicRegionsWriting:
         assert read[2].length == 10
         assert read[3].length == 1110
         assert read[4].length == 11110
-        assert read[0].name == b'a'
-        assert read[1].name == b'c'
-        assert read[2].name == b'b'
-        assert read[3].name == b'd'
-        assert read[4].name == b'e'
+        assert read[0].name == b"a"
+        assert read[1].name == b"c"
+        assert read[2].name == b"b"
+        assert read[3].name == b"d"
+        assert read[4].name == b"e"
+
+    @pytest.mark.xfail(reason="No write for bigbed currently implemented")
+    def test_write_bigbed(self):
+        self.setUp()
+        from mbf_fileformats.bed import read_bigbed
+
+        self.a.write_bigbed(self.sample_filename)
+        run_pipegraph()
+        assert len(self.a.df) > 0
+        read = read_bigbed(self.sample_filename)
+
+        assert len(read) == len(self.a.df)
+        assert (read["chr"] == self.a.df["chr"]).all()
+        assert (read["start"] == self.a.df["start"]).all()
+        assert (read["stop"] == self.a.df["stop"]).all()
+        assert (read["strand"] == self.a.df["strand"]).all()
+
+    def test_write_bed_with_name_column_not_found(self):
+        self.setUp()
+        from mbf_fileformats.bed import read_bed
+
+        with RaisesDirectOrInsidePipegraph(KeyError):
+            self.a.write_bed(self.sample_filename, region_name="name_not_found")
 
     def test_write(self):
         self.setUp()
@@ -1147,7 +1169,7 @@ class TestFilter:
             return pd.DataFrame({"chr": ["1"], "start": [1001], "stop": [1002]})
 
         b = regions.GenomicRegions("b", sample_data, [], self.genome)
-        c = regions.GenomicRegions_FilterRemoveOverlapping('c', self.a, b)
+        c = regions.GenomicRegions_FilterRemoveOverlapping("c", self.a, b)
         c.write("shu.tsv")
         run_pipegraph()
         assert len(c.df) == 4
@@ -1301,6 +1323,20 @@ class TestInterval:
         force_load(b.build_intervals())
         run_pipegraph()
         assert len(b.df) == 0
+        assert not len(b.get_overlapping("1", 0, 10000))
+        assert not b.has_overlapping("1", 0, 10000)
+        assert not len(b.get_closest("1", 500))
+
+    def test_build_intervals_works_with_missing_chrs(self):
+        self.setUp()
+
+        def sample_data():
+            return pd.DataFrame({"chr": ["2"], "start": [100], "stop": [1000]})
+
+        b = regions.GenomicRegions("shub", sample_data, [], get_genome_chr_length())
+        force_load(b.build_intervals())
+        run_pipegraph()
+        assert len(b.df) == 1
         assert not len(b.get_overlapping("1", 0, 10000))
         assert not b.has_overlapping("1", 0, 10000)
         assert not len(b.get_closest("1", 500))
@@ -1988,8 +2024,8 @@ class TestSetOperationsOnGenomicRegions:
         b = self.sample_to_gr(b, "b")
         force_load(a.build_intervals())
         force_load(b.build_intervals())
-        just_a = regions.GenomicRegions_FilterRemoveOverlapping("just_a",a, b)
-        just_b = regions.GenomicRegions_FilterRemoveOverlapping("just_b",b, [a])
+        just_a = regions.GenomicRegions_FilterRemoveOverlapping("just_a", a, b)
+        just_b = regions.GenomicRegions_FilterRemoveOverlapping("just_b", b, [a])
         force_load(just_a.load())
         force_load(just_b.load())
         both = regions.GenomicRegions_Overlapping("ab", a, b)

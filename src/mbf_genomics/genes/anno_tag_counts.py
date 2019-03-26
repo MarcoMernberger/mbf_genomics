@@ -152,10 +152,10 @@ class CounterStrategyUnstranded(_CounterStrategyBase):
         for ii in counts:
             gene_stable_id = no_to_gene[ii]
             real_counts[gene_stable_id] = len(counts[ii])
-        if not real_counts and gene_to_no and len(chr) == 1:
-            print(counts)
-            print(real_counts)
-            print(not real_counts)
+        # if not real_counts and gene_to_no and len(chr) == 1:
+        # print(counts)
+        # print(real_counts)
+        # print(not real_counts)
         #            raise ValueError("Nothing counted %s" % chr)
         return real_counts
 
@@ -199,7 +199,9 @@ class CounterStrategyWeightedStranded(_CounterStrategyBase):
                     if read.qname not in read_storage:
                         read_storage[read.qname] = [(genes_hit, count_per_hit)]
                     else:
-                        if read_storage[read.qname] is False:
+                        if (
+                            read_storage[read.qname] is False
+                        ):  # pragma: no cover defensive
                             import pprint
 
                             raise ValueError(
@@ -319,8 +321,6 @@ class IntervalStrategyExon(_IntervalStrategy):
             last_stable_id = ""
             exon_info = genome.df_exons
             exon_info = merge_intervals(exon_info)
-            if not isinstance(exon_info, pd.DataFrame):
-                exon_info = exon_info.to_pandas()
             exon_info = exon_info[exon_info.chr == chr]
             for rowno, row in exon_info.iterrows():
                 if last_stable_id != row["gene_stable_id"]:
@@ -347,8 +347,11 @@ def get_all_gene_exons_protein_coding(genome):
         exons = g.exons_protein_coding_merged
         exons = exons.assign(gene_stable_id=g.gene_stable_id)
         result.append(exons)
-    if len(result) == 0:
-        result = pd.DataFrame({})
+    if len(result) == 0: # pragma: no cover - 
+        raise ValueError("No exons in genome?!")
+        #result = pd.DataFrame(
+            #{"gene_stable_id": [], "chr": [], "start": [], "stop": [], "strand": []}
+        #)
     else:
         result = pd.concat(result, sort=False)
         return result

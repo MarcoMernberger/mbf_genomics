@@ -144,7 +144,7 @@ class RaisesDirectOrInsidePipegraph(object):
     """Piece of black magic from the depths of _pytest
     that will check whether a piece of code will raise the
     expected expcition (if outside of ppg), or if it will
-    rise the exception when the pipegraph is running
+    raise the exception when the pipegraph is running
 
     Use as a context manager like pytest.raises"""
 

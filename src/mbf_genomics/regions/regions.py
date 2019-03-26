@@ -586,7 +586,7 @@ class GenomicRegions(DelayedDataFrame):
                         if region_name in row:
                             return row[region_name]
                         else:
-                            raise ValueError(
+                            raise KeyError(
                                 "key: %s not in genomic regions object. These objects are available: %s"
                                 % (region_name, self.df.columns)
                             )
@@ -619,7 +619,7 @@ class GenomicRegions(DelayedDataFrame):
 
     def write_bigbed(self, output_filename=None):
         """Store the intervals of the GenomicRegion in a big bed file"""
-        from mbf_fileformats.bed import BedEntry, write_big_bed
+        from mbf_fileformats.bed import BedEntry, write_bigbed
 
         output_filename = self.pathify(output_filename, self.name + ".bigbed")
 
@@ -652,7 +652,7 @@ class GenomicRegions(DelayedDataFrame):
                     )
                 bed_entries.append(entry)
             if len(self.df):
-                write_big_bed(
+                write_bigbed(
                     bed_entries, output_filename, self.genome.get_chromosome_lengths()
                 )
             else:

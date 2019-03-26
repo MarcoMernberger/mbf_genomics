@@ -125,7 +125,7 @@ class TestGenomicRegionConvertTests:
         assert len(g.df) == len(b.df)
         assert "strand" in b.df.columns
         # we have to go by index - the order might change
-        #convert to list of strings - bug in at it won't work otherwise
+        # convert to list of strings - bug in at it won't work otherwise
         b_df = b.df.assign(gene_stable_id=[x for x in b.df.gene_stable_id])
         g_df = g.df.assign(gene_stable_id=[x for x in g.df.gene_stable_id])
         b_df = b_df.set_index("gene_stable_id")
@@ -144,9 +144,9 @@ class TestGenomicRegionConvertTests:
         def sample_data():
             return pd.DataFrame(
                 {
-                    "chr": ["1", "1", "1", "2", "2"],
-                    "start": [10, 13, 102, 5, 6000],
-                    "stop": [12, 100, 1000, 5000, 6010],
+                    "chr": ["1", "1", "1", "1", "1", "2", "3", "3", "4"],
+                    "start": [10, 13, 110, 300, 400, 102, 5, 6000, 10],
+                    "stop": [12, 100, 200, 400, 410, 1000, 5000, 6010, 100],
                 }
             )
 
@@ -154,8 +154,9 @@ class TestGenomicRegionConvertTests:
         b = a.convert("agrown", regions.convert.merge_connected())
         force_load(b.load())
         ppg.run_pipegraph()
-        assert (b.df["start"] == [10, 102, 5, 6000]).all()
-        assert (b.df["stop"] == [100, 1000, 5000, 6010]).all()
+        assert (b.df["chr"] == ["1", "1", "1", "2", "3", "3", "4"]).all()
+        assert (b.df["start"] == [10, 110, 300, 102, 5, 6000, 10]).all()
+        assert (b.df["stop"] == [100, 200, 410, 1000, 5000, 6010, 100]).all()
 
     def test_merge_connected_2(self):
         def sample_data():
@@ -192,6 +193,49 @@ class TestGenomicRegionConvertTests:
         # http://genome.ucsc.edu/cgi-bin/hgLiftOver
         assert (b.df["start"] == [27570689, 27572089, 100000]).all()
         assert (b.df["stop"] == [27570789, 27572189, 100100]).all()
+
+    def test_liftover_filter_chr(self):
+        def sample_data():
+            return pd.DataFrame(
+                {
+                    "chr": ["2", "1", "11_gl000202_random", "MT"],
+                    "start": [100, 27897200, 500, 100000],
+                    "stop": [10000, 27897300, 5000, 100100],
+                    "copy": ["D", "A", "B", "C"],
+                    "name": ["d", "a", "b", "c"],
+                }
+            )
+
+        a = regions.GenomicRegions(
+            "sharum",
+            sample_data,
+            [],
+            get_genome_chr_length(
+                {
+                    "1": 100000,
+                    "2": 100000,
+                    "11_gl000202_random": 100000,
+                    "MT": 100000,
+                    "11": 1000000,
+                }
+            ),
+        )
+        b = a.convert(
+            "hg38",
+            regions.convert.hg19_to_hg38(
+                keep_name=True  , filter_to_these_chromosomes=["1"]
+            ),
+        )
+        force_load(b.load())
+        ppg.run_pipegraph()
+        # made these with the ucsc web liftover utility
+        # http://genome.ucsc.edu/cgi-bin/hgLiftOver
+        print(b.df)
+        assert (b.df["start"] == [27570689]).all()
+        assert (b.df["stop"] == [27570789]).all()
+        assert (b.df["copy"] == ["A"]).all()
+        assert (b.df["name"] == ["a"]).all()
+        assert (b.df["chr"] == ["1"]).all()
 
     def test_windows(self):
         def sample_data():
