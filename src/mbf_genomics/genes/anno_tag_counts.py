@@ -344,9 +344,10 @@ class IntervalStrategyExon(_IntervalStrategy):
 def get_all_gene_exons_protein_coding(genome):
     result = []
     for g in genome.genes.values():
-        exons = g.exons_protein_coding_merged
-        exons = exons.assign(gene_stable_id=g.gene_stable_id)
-        result.append(exons)
+        e = g.exons_protein_coding_merged
+        if len(e) == 0:
+            e = g.exons_merged
+        result.append(e)
     if len(result) == 0: # pragma: no cover - 
         raise ValueError("No exons in genome?!")
         #result = pd.DataFrame(

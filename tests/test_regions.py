@@ -890,6 +890,7 @@ class TestGenomicRegionsWriting:
                     "start": [10, 100, 1000, 10000, 100_000],
                     "stop": [11, 110, 1110, 11110, 111_110],
                     "name": ["a", "b", "c", "d", "e"],
+                    "notname": ["A", "B", "C", "D", "E"],
                 }
             )
 
@@ -955,6 +956,23 @@ class TestGenomicRegionsWriting:
         assert read[2].name == b"b"
         assert read[3].name == b"d"
         assert read[4].name == b"e"
+
+    @pytest.mark.xfail(reason="No write for bigbed currently implemented")
+    def test_write_bigbed_name_column(self):
+        self.setUp()
+        from mbf_fileformats.bed import read_bigbed
+
+        self.a.write_bigbed(self.sample_filename, "notname")
+        run_pipegraph()
+        assert len(self.a.df) > 0
+        read = read_bigbed(self.sample_filename)
+
+        assert len(read) == len(self.a.df)
+        assert (read["chr"] == self.a.df["chr"]).all()
+        assert (read["start"] == self.a.df["start"]).all()
+        assert (read["stop"] == self.a.df["stop"]).all()
+        assert (read["strand"] == self.a.df["strand"]).all()
+        assert (read["name"] == self.a.df["name"]).all()
 
     @pytest.mark.xfail(reason="No write for bigbed currently implemented")
     def test_write_bigbed(self):
@@ -2163,6 +2181,47 @@ class TestFromXYZ:
                 b"0.742024408736128",
             ]
         ).all()
+
+    def test_gff_below_zero(self):
+        b = regions.GenomicRegions_FromGFF(
+            "sha",
+            data_path / "test_below_zero.gff3",
+            get_genome_chr_length(),
+            filter_function=lambda entry: entry["source"]
+            == b"Regions_of_sig_enrichment",
+            comment_char="#",
+            fix_negative_coordinates=True,
+        )
+
+        if ppg.inside_ppg():
+            a = regions.GenomicRegions_FromGFF(
+                "shu",
+                data_path / "test_below_zero.gff3",
+                get_genome_chr_length(),
+                filter_function=lambda entry: entry["source"]
+                == b"Regions_of_sig_enrichment",
+                comment_char="#",
+            )
+            force_load(a.load())
+            force_load(b.load())
+            jobA = a.load()
+            jobB = b.load()
+            with pytest.raises(ppg.RuntimeError):
+                ppg.run_pipegraph()
+                assert isinstance(jobA.exception, "ValueError")
+                assert len(b.df)
+        else:
+            with pytest.raises(ValueError):
+                a = regions.GenomicRegions_FromGFF(
+                    "shu",
+                    data_path / "test_below_zero.gff3",
+                    get_genome_chr_length(),
+                    filter_function=lambda entry: entry["source"]
+                    == b"Regions_of_sig_enrichment",
+                    comment_char="#",
+                )
+            b.load()
+        assert (b.df["start"] >= 0).all()
 
     def test_gff_chromosome_mangler(self):
         a = regions.GenomicRegions_FromGFF(

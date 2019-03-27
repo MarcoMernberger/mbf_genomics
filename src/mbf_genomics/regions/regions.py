@@ -479,8 +479,9 @@ class GenomicRegions(DelayedDataFrame):
             chr_start, chr_stop = self.chromosome_intervals[chr]
         except KeyError:
             return self.df[0:0]  # ie an empty df
-        if chr_stop == chr_start:  # no intervals on this chromosome
-            return self.df[0:0]  # ie an empty df
+        #if chr_stop == chr_start:  # no intervals on this chromosome 
+        # - apperantly already covered by it not being in chrosome_intervals?
+            #return self.df[0:0]  # ie an empty df
         start_array = np.array(self.df["start"][chr_start:chr_stop])
         stop_array = np.array(self.df["stop"][chr_start:chr_stop])
         if self.need_to_handle_overlapping_regions:
@@ -617,7 +618,7 @@ class GenomicRegions(DelayedDataFrame):
             deps = []
         return self.load_strategy.generate_file(output_filename, write, deps)
 
-    def write_bigbed(self, output_filename=None):
+    def write_bigbed(self, output_filename=None, name_column=None):
         """Store the intervals of the GenomicRegion in a big bed file"""
         from mbf_fileformats.bed import BedEntry, write_bigbed
 
@@ -627,29 +628,13 @@ class GenomicRegions(DelayedDataFrame):
 
             bed_entries = []
             for idx, row in self.df.iterrows():
-                if "repeat_name" in row:
-                    entry = BedEntry(
-                        row["chr"],
-                        row["start"],
-                        row["stop"],
-                        name=row["repeat_name"],
-                        strand=row["strand"] if "strand" in row else 0,
-                    )
-                elif "name" in row:
-                    entry = BedEntry(
-                        row["chr"],
-                        row["start"],
-                        row["stop"],
-                        name=row["name"],
-                        strand=row["strand"] if "strand" in row else 0,
-                    )
-                else:
-                    entry = BedEntry(
-                        row["chr"],
-                        row["start"],
-                        row["stop"],
-                        strand=row["strand"] if "strand" in row else 0,
-                    )
+                entry = BedEntry(
+                    row["chr"],
+                    row["start"],
+                    row["stop"],
+                    name=row[name_column] if name_column else None,
+                    strand=row["strand"] if "strand" in row else 0,
+                )
                 bed_entries.append(entry)
             if len(self.df):
                 write_bigbed(
