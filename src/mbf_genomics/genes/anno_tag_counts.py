@@ -342,20 +342,11 @@ class IntervalStrategyExon(_IntervalStrategy):
 
 
 def get_all_gene_exons_protein_coding(genome):
-    result = []
     for g in genome.genes.values():
         e = g.exons_protein_coding_merged
-        if len(e) == 0:
+        if len(e[0]) == 0:
             e = g.exons_merged
-        result.append(e)
-    if len(result) == 0: # pragma: no cover - 
-        raise ValueError("No exons in genome?!")
-        #result = pd.DataFrame(
-            #{"gene_stable_id": [], "chr": [], "start": [], "stop": [], "strand": []}
-        #)
-    else:
-        result = pd.concat(result, sort=False)
-        return result
+        yield (g.gene_stable_id, g.chr, g.strand, e)
 
 
 class IntervalStrategyExonSmart(_IntervalStrategy):
@@ -371,7 +362,12 @@ class IntervalStrategyExonSmart(_IntervalStrategy):
         length_by_gene = collections.Counter()
         exon_info_all = get_all_gene_exons_protein_coding(
             genome
-        )  # these are already merged
+        )  # these are already merged per gene
+        exon_info_by_chr = {chr: [] for chr in genome.get_chromosome_lengths()}
+        for tup in exon_info_all:
+            exon_info_by_chr[tup[1]].append(tup)
+
+
         for chr in genome.get_chromosome_lengths():
             tree_forward = bx.intervals.IntervalTree()
             tree_reverse = bx.intervals.IntervalTree()
@@ -379,21 +375,21 @@ class IntervalStrategyExonSmart(_IntervalStrategy):
             ii = -1
             last_stable_id = ""
 
-            exon_info = exon_info_all[exon_info_all.chr == chr]
-            for rowno, row in exon_info.iterrows():
-                if last_stable_id != row["gene_stable_id"]:
+            exon_info = exon_info_by_chr[chr]
+            for gene_stable_id, chr, strand, exons in exon_info:
+                if last_stable_id != gene_stable_id:
                     ii += 1
-                    last_stable_id = row["gene_stable_id"]
+                    last_stable_id = gene_stable_id
                     gene_to_no[last_stable_id] = ii
-                if row["strand"] == 1:
-                    tree_forward.insert_interval(
-                        bx.intervals.Interval(row["start"], row["stop"], ii)
-                    )
+                if strand == 1:
+                    t = tree_forward
                 else:
-                    tree_reverse.insert_interval(
-                        bx.intervals.Interval(row["start"], row["stop"], ii)
+                    t = tree_reverse
+                for start, stop in zip(*exons):
+                    t.insert_interval(
+                        bx.intervals.Interval(start, stop, ii)
                     )
-                length_by_gene[row["gene_stable_id"]] += row["stop"] - row["start"]
+                    length_by_gene[gene_stable_id] += stop - start
 
             _bx_exon_intervals[chr] = tree_forward, tree_reverse, gene_to_no
         setattr(genome, self.key, (_bx_exon_intervals, length_by_gene))
