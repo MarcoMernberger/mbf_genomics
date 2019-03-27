@@ -63,7 +63,7 @@ def GenomicRegions_FromGFF(
             data["stop"].append(entry["end"])
             data["score"].append(entry["score"])
             data["strand"].append(entry["strand"])
-            name = entry["attributes"]["Name"] if "Name" in entry["attributes"] else ""
+            name = entry["attributes"].get("Name", [""])[0]
             data["name"].append(name)
             if name:
                 name_found = True
@@ -117,8 +117,6 @@ def GenomicRegions_FromWig(
     def load():
         df = wiggle_to_intervals(filename, comment_char=comment_char)
         df["chr"] = [to_string(x) for x in df["chr"]]
-        if hasattr(df, "to_pandas"):
-            df = df.to_pandas()
         if enlarge_5prime:
             df["start"] -= enlarge_5prime
         if enlarge_3prime:
@@ -177,7 +175,7 @@ def GenomicRegions_FromBed(
             raise ValueError("Emtpty Bed file - %s" % filename)
         if (np.isnan(res["score"])).all():
             res = res.drop(["score"], axis=1)
-        if len(res["name"].unique()) == 1:
+        if (len(res["name"]) > 1) and (len(res["name"].unique()) == 1):
             res = res.drop(["name"], axis=1)
         return res
 
@@ -291,65 +289,27 @@ def GenomicRegions_BinnedGenome(
 def GenomicRegions_Union(
     name,
     list_of_grs,
-    on_overlap="merge",
     summit_annotator=None,
-    expand_by_x_bp=0,
-    on_below_zero_by_expansion="raise",
     sheet_name="Overlaps",
 ):
-    """Combine serveral GRs into one, similar to GR.union(), which handles only two.
-    You can use @expand_by_x_bp = 1 to merge regions right next to each other (think binned genome)
+    """Combine serveral GRs into one.
+
+    Do not set on_overlap 
+
+
     """
-    allowed_on_below_zero_by_expansion = ("raise", "ignore", " drop", "truncate")
-    if on_below_zero_by_expansion not in allowed_on_below_zero_by_expansion:
-        raise ValueError(
-            "on_below_zero_by_expansion  not in allowed values (%s)"
-            % allowed_on_below_zero_by_expansion
-        )
     verify_same_genome(list_of_grs)
 
     def load():
-        if not expand_by_x_bp:
-            dfs = [x.df[["chr", "start", "stop"]] for x in list_of_grs]
-            return pd.concat(dfs, axis=0)
-        else:
-            dfs = [
-                pd.DataFrame(
-                    {
-                        "chr": x.df["chr"],
-                        "start": x.df["start"] - expand_by_x_bp,
-                        "stop": x.df["stop"] + expand_by_x_bp,
-                    }
-                )
-                for x in list_of_grs
-            ]
-            ret = pd.concat(dfs, axis=0)
-            if (ret["start"] <= 0).any():
-                if allowed_on_below_zero_by_expansion == "raise":
-                    raise ValueError(
-                        "expand_by_x_bp created regions with start < 0. Choose one of the options for on_below_zero_by_expansion (%s)"
-                        % allowed_on_below_zero_by_expansion
-                    )
-                elif allowed_on_below_zero_by_expansion == "drop":
-                    ret = ret[ret["start"] >= 0]
-                elif allowed_on_below_zero_by_expansion == "truncate":
-                    ret["start"] = ret["start"].clip(lower=0)
-                elif allowed_on_below_zero_by_expansion == "ignore":
-                    pass
-                else:
-                    # should not occur
-                    raise NotImplementedError(
-                        "Do not know how to handle on_below_zero_by_expansion of %s"
-                        % on_below_zero_by_expansion
-                    )
-            return ret
-
+        dfs = [x.df[["chr", "start", "stop"]] for x in list_of_grs]
+        return pd.concat(dfs, axis=0)
+   
     if ppg.inside_ppg():
         deps = [x.load() for x in list_of_grs]
         deps.append(
             ppg.ParameterInvariant(
                 name + "_input_grs",
-                list(sorted([x.name for x in list_of_grs])) + [expand_by_x_bp],
+                list(sorted([x.name for x in list_of_grs])),
             )
         )
     else:
@@ -360,7 +320,7 @@ def GenomicRegions_Union(
         load,
         deps,
         list_of_grs[0].genome,
-        on_overlap=on_overlap,
+        on_overlap="merge",
         summit_annotator=summit_annotator,
         sheet_name=sheet_name,
         vid=vid,
@@ -599,39 +559,18 @@ def GenomicRegions_FromPartec(
     name, filename, genome, on_overlap="raise", summit_annotator=None, vid=None
 ):
     """create GenomicRegions from Partec's output"""
-    import xlrd
-
-    def load():
-        print("loading for", name)
-
-        try:
-            df = pd.read_excel(filename)
-        except xlrd.XLRDError:
-            df = pd.read_csv(filename, sep="\t")
-
-        renames = {}
-        for column in df.columns:
-            if "start" == column.lower():
-                renames[column] = "start"
-            if "stop" == column.lower() or "end" == column.lower():
-                renames[column] = "stop"
-            if "chromosome" == column.lower():
-                renames[column] = "chr"
-        if renames:
-            df = df.rename(columns=renames)
-
-        df["chr"] = df["chr"].astype(str)
-        df["start"] = df["start"].astype(int)
-        df["stop"] = df["stop"].astype(int)
-        return df
-
-    if ppg.util.inside_ppg():
-        deps = [ppg.FileTimeInvariant(filename)]
-    else:
-        deps = []
-
-    return GenomicRegions(
-        name, load, deps, genome, on_overlap, summit_annotator=summit_annotator, vid=vid
+    return GenomicRegions_FromTable(
+        name,
+        filename,
+        genome,
+        on_overlap=on_overlap,
+        summit_annotator=summit_annotator,
+        vid=vid,
+        chr_column="Chromosome",
+        start_column="Start",
+        stop_column="Stop",
+        drop_further_columns=False,
+        reader=lambda x: pd.read_csv(x, sep="\t"),
     )
 
 
@@ -640,19 +579,28 @@ def GenomicRegions_FromTable(
     filename,
     genome,
     on_overlap="raise",
+    summit_annotator=None,
     filter_func=None,
     vid=None,
     sheet_name="FromTable",
     drop_further_columns=True,
+    chr_column="chr",
+    start_column="start",
+    stop_column="stop",
+    one_based=False,
+    reader=read_pandas,
 ):
-    """Read a table file (csv/tsv/xls) with the correct chr/start/stop columns, drop all further columns"""
+    """Read a table file (csv/tsv/xls) with the chr/start/stop columns (renamed?), optionally 
+    drop all further columns"""
 
     def load():
 
-        df = read_pandas(filename)
-        df["chr"] = df["chr"].astype(str)
-        df["start"] = df["start"].astype(int)
-        df["stop"] = df["stop"].astype(int)
+        df = reader(filename)
+        df["chr"] = df[chr_column].astype(str)
+        df["start"] = df[start_column].astype(int)
+        if one_based:
+            df["start"] -= 1
+        df["stop"] = df[stop_column].astype(int)
         if drop_further_columns:
             df = df[["chr", "start", "stop"]]
         if filter_func:
@@ -667,26 +615,15 @@ def GenomicRegions_FromTable(
     else:
         deps = []
     return GenomicRegions(
-        name, load, deps, genome, on_overlap, sheet_name=sheet_name, vid=vid
+        name,
+        load,
+        deps,
+        genome,
+        on_overlap,
+        summit_annotator=summit_annotator,
+        sheet_name=sheet_name,
+        vid=vid,
     )
-
-
-def GenomicRegions_FromGenome(genome):
-    """For creating a gr from a FileBasedGenome"""
-
-    def __loading_function():
-        data = {"chr": [], "start": [], "stop": []}
-        for key, value in genome.fasta_iterator(genome.sequence_fasta_filename):
-            data["chr"].append(key.split(" ")[0])
-            data["start"].append(0)
-            data["stop"].append(len(value))
-        return pd.DataFrame(data)
-
-    if ppg.inside_ppg():
-        deps = [genome.get_dependencies()]
-    else:
-        deps = []
-    return GenomicRegions("spike_genomic_region", __loading_function, deps, genome)
 
 
 def GenomicRegions_CommonInAtLeastX(
@@ -696,7 +633,7 @@ def GenomicRegions_CommonInAtLeastX(
 
     def load():
         union = merge_intervals(
-            pd.contact([x.df[["chr", "start", "stop"]] for x in list_of_grs])
+            pd.concat([x.df[["chr", "start", "stop"]] for x in list_of_grs])
         )
         keep = np.zeros((len(union),), dtype=np.bool)
         for ii, row in union.iterrows():
@@ -720,6 +657,7 @@ def GenomicRegions_CommonInAtLeastX(
         )
     else:
         deps = []
+        [x.build_intervals() for x in list_of_grs]
     vid = ("common at least %i" % X, [x.vid for x in list_of_grs])
     return GenomicRegions(
         name,
@@ -822,7 +760,7 @@ def GenomicRegions_FilterRemoveOverlapping(
                 )
         return ~keep
 
-    if not summit_annotator:
+    if not summit_annotator:  # pragma: no cover
         summit_annotator = gr_a.summit_annotator
 
     if gr_a.load_strategy.build_deps:

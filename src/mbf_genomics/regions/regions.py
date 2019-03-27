@@ -346,6 +346,8 @@ class GenomicRegions(DelayedDataFrame):
 
         elif self.on_overlap == "drop":
             return self.drop_intervals(df)
+        else: # pragma: no branch - defensive
+            raise NotImplementedError("This branch should not happen - unhandled on_overlap")
 
     def merge_intervals(self, df):
         return merge_intervals(df)
@@ -377,7 +379,7 @@ class GenomicRegions(DelayedDataFrame):
             if starts[ii] < last_stop:
                 keep[ii] = False
                 keep[ii - 1] = False
-            else:
+            else: # pragma: no cover
                 pass
             if stops[ii] > last_stop:
                 last_stop = stops[ii]
@@ -385,8 +387,6 @@ class GenomicRegions(DelayedDataFrame):
             ii += 1
         if last_row is not None:
             keep[last_row] = True
-        # new_rows.append(df.get_row(last_row))
-        # return pydataframe.DataFrame(new_rows)
         return df.iloc[keep]
 
     def do_build_intervals(self):
@@ -618,9 +618,10 @@ class GenomicRegions(DelayedDataFrame):
             deps = []
         return self.load_strategy.generate_file(output_filename, write, deps)
 
-    def write_bigbed(self, output_filename=None, name_column=None):
+    def write_bigbed(self, output_filename=None, name_column=None): # pragma: no cover - till we have the test
         """Store the intervals of the GenomicRegion in a big bed file"""
         from mbf_fileformats.bed import BedEntry, write_bigbed
+        raise ValueError("track this")
 
         output_filename = self.pathify(output_filename, self.name + ".bigbed")
 
@@ -662,20 +663,6 @@ class GenomicRegions(DelayedDataFrame):
             if not k in kwargs:
                 kwargs[k] = getattr(self, k)
         return GenomicRegions(new_name, load_func, deps, genome=self.genome, **kwargs)
-
-    def __remove_me_fil_er_to_overlapping_count(self, other_gr):
-        """Return the length a GenomicRegions that was created via filter_to_overlapping would have,
-        without actually creating it.... Must have called other_gr.build_intervals() first (and this one must have been loaded)"""
-        if other_gr.genome != self.genome:
-            raise ValueError(
-                "Unequal genomes betwen %s %s in filter_remove_overlapping"
-                % (self.name, other_gr.name)
-            )
-        count = 0
-        for ii, row in self.df[["chr", "start", "stop"]].iterrows():
-            if other_gr.has_overlapping(row["chr"], row["start"], row["stop"]):
-                count += 1
-        return count
 
     def _iter_intersections(self, other_gr):
         """Iterate over (chr, start, stop) tuples of the intersections between this GenomicRegions

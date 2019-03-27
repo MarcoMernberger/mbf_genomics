@@ -2,6 +2,7 @@ import pandas as pd
 
 
 def read_pandas(filename):
+    filename = str(filename)
     if filename.endswith(".xls") or filename.endswith(".xlsx"):
         from xlrd import XLRDError
 

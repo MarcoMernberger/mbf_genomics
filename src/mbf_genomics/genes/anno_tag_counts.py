@@ -66,7 +66,7 @@ class CounterStrategyStranded(_CounterStrategyBase):
                     tree = tree_forward
                 else:
                     tree = tree_reverse
-            for sub_start, sub_stop in read.get_reference_regions():
+            for sub_start, sub_stop in read.get_blocks():
                 for x in tree.find(sub_start, sub_stop):
                     seen.add(
                         x.value
@@ -138,7 +138,7 @@ class CounterStrategyUnstranded(_CounterStrategyBase):
         # uargh.
         for read in samfile.fetch(chr, 0, genome.get_chromosome_lengths()[chr]):
             seen = set()
-            for sub_start, sub_stop in read.get_reference_regions():
+            for sub_start, sub_stop in read.get_blocks():
                 for t in tree_forward, tree_reverse:
                     for x in t.find(sub_start, sub_stop):
                         seen.add(x.value)
@@ -182,7 +182,7 @@ class CounterStrategyWeightedStranded(_CounterStrategyBase):
                 else:
                     tree = tree_forward
                 genes_hit = set()
-                for sub_start, sub_stop in read.get_reference_regions():
+                for sub_start, sub_stop in read.get_blocks():
                     for x in tree.find(sub_start, sub_stop):
                         genes_hit.add(
                             no_to_gene[x.value]
@@ -377,10 +377,8 @@ class IntervalStrategyExonSmart(_IntervalStrategy):
 
             exon_info = exon_info_by_chr[chr]
             for gene_stable_id, chr, strand, exons in exon_info:
-                if last_stable_id != gene_stable_id:
-                    ii += 1
-                    last_stable_id = gene_stable_id
-                    gene_to_no[last_stable_id] = ii
+                ii += 1
+                gene_to_no[gene_stable_id] = ii
                 if strand == 1:
                     t = tree_forward
                 else:
@@ -732,7 +730,7 @@ class NormalizationFPKMBiotypes(Annotator):
         return [self.raw_anno]
 
     def calc(self, df):
-        raw_counts = df[self.raw_anno.columns[0]]
+        raw_counts = df[self.raw_anno.columns[0]].copy()
         # RPKM = (CDS read count * 10^9) / (CDS length * total mapped read
         # count)
         ok = np.zeros(len(df), np.bool)

@@ -50,6 +50,7 @@ def promotorize(basepairs=1250):
 
     return do_promotorize, [], basepairs
 
+
 def shift(basepairs):
     def do_shift(df):
         res = {
@@ -64,11 +65,12 @@ def shift(basepairs):
 
 def summit(summit_annotator):
     def do_summits(df):
-        summit_col = summit_annotator.column_name
+        summit_col = summit_annotator.columns[0]
+        starts = (df["start"] + df[summit_col]).astype(np.int)
         res = {
             "chr": df["chr"],
-            "start": df["start"] + df[summit_col],
-            "stop": df["start"] + df[summit_col] + 1,
+            "start": starts,
+            "stop": starts + 1, 
         }
         return pd.DataFrame(res)
 
@@ -81,45 +83,8 @@ def merge_connected():
     """
 
     def do_merge(df):
-        df = df.sort_values(
-            ["chr", "start"], ascending=[True, True]
-        )  # you need to do this here so it's true later. Also it makes a copy...
-        last_chr = None
-        last_stop = -1
-        last_row = None
-
-        chrs = df["chr"]
-        starts = df["start"]
-        stops = df["stop"]
-
-        ii = 0
-        lendf = len(df)
-        keep = np.zeros((lendf,), dtype=np.bool)
-        while ii < lendf:
-            if chrs[ii] != last_chr:
-                last_chr = chrs[ii]
-                last_stop = -1
-                if last_row is not None:
-                    keep[last_row] = True
-            else:
-                if (
-                    starts[ii] <= last_stop + 1
-                ):  # +1 so that being next to each other is enough
-                    starts[ii] = starts[last_row]
-                    stops[ii] = max(stops[ii], last_stop)
-                else:
-                    if last_row is not None:
-                        keep[last_row] = True
-                        # new_rows.append(df.get_row(last_row))
-            if stops[ii] > last_stop:
-                last_stop = stops[ii]
-            last_row = ii
-            ii += 1
-        if last_row is not None: # pragma: no branch
-            keep[last_row] = True
-            # new_rows.append(df.get_row(last_row))
-        # return pd.DataFrame(new_rows)
-        return df[keep]
+        from mbf_genomes.intervals import merge_intervals
+        return merge_intervals(df, 1)
 
     return do_merge
 
@@ -157,7 +122,7 @@ class LiftOver(object):
         ]
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         dummy_stdout, stderr = p.communicate()
-        if p.returncode != 0: # pragma: no cover
+        if p.returncode != 0:  # pragma: no cover
             raise ValueError(
                 "do_liftover failed. Returncode: %s, stderr: %s"
                 % (p.returncode, stderr)
@@ -180,7 +145,7 @@ class LiftOver(object):
     def get_convert_func(self, key, keep_name=False, filter_to_these_chromosomes=None):
         """Note that filter_to_these_chromosomes is after the replacements have kicked in"""
         chain_file = self.data_path / (key + ".over.chain")
-        if not chain_file.exists(): # pragma: no cover
+        if not chain_file.exists():  # pragma: no cover
             raise ValueError("invalid liftover key, file not found: %s" % chain_file)
         if filter_to_these_chromosomes:
             filter_to_these_chromosomes = set(filter_to_these_chromosomes)
@@ -206,13 +171,16 @@ class LiftOver(object):
                 }
             )
             if keep_name:
-                res = res.assign(name=[x.decode('utf-8') for x in output_lists[3]])
+                res = res.assign(name=[x.decode("utf-8") for x in output_lists[3]])
             new_chr = []
             for x in res["chr"]:
                 x = x[3:]
-                if x == "m":
+                # these are untested as of 2019-03-27
+                if x == "m":  # pragma: no cover
                     x = "MT"
-                elif key in self.replacements and x in self.replacements[key]:
+                elif (
+                    key in self.replacements and x in self.replacements[key]
+                ):  # pragma: no cover
                     x = self.replacements[key][x]
                 new_chr.append(x)
             res["chr"] = new_chr
@@ -223,60 +191,25 @@ class LiftOver(object):
                 res = res[res["chr"].isin(filter_to_these_chromosomes)]
             return res
 
-        do_convert.dependencies = [
-            ppg.FileTimeInvariant(chain_file),
-            ppg.FunctionInvariant(
-                "genomics.regions.convert.LiftOver.do_liftover", LiftOver.do_liftover
-            ),
-        ]
+        if ppg.inside_ppg():
+            do_convert.dependencies = [
+                ppg.FileTimeInvariant(chain_file),
+                ppg.FunctionInvariant(
+                    "genomics.regions.convert.LiftOver.do_liftover", LiftOver.do_liftover
+                ),
+            ]
         return do_convert
 
 
-def hg19_to_hg38(keep_name=False, filter_to_these_chromosomes=None):
-    """Map a human genome 19 genomic regions into hg 38(=grch38)"""
+def lift_over(from_to, keep_name=False, filter_to_these_chromosomes=None):
+    """Map a genome to another genome.
+    from_to looks like hg19ToHg38
+    see mbf_genomes/data/liftovers for the list currently supported"""
     return LiftOver().get_convert_func(
-        "hg19ToHg38", 
+        from_to,
         keep_name=keep_name,
-        filter_to_these_chromosomes=filter_to_these_chromosomes
+        filter_to_these_chromosomes=filter_to_these_chromosomes,
     )
-
-
-def hg18_to_hg19():
-    """Map a human genome 18 (genome == chipseq.genomes.NBCI36()) genomic regions into hg 19(=grch37
-    or ensembl.EnsemblGenome('Homo_sapiens',58+)"""
-    return LiftOver().get_convert_func("hg18ToHg19")
-
-
-def hg18_to_hg19_keep_name():
-    """Map a human genome 18 (genome == chipseq.genomes.NBCI36()) genomic regions into hg 19(=grch37
-    or ensembl.EnsemblGenome('Homo_sapiens',58+)"""
-    return LiftOver().get_convert_func("hg18ToHg19", True)
-
-
-def hg17_to_hg19():
-    """Map a human genome 18 (genome == chipseq.genomes.HG17()) genomic regions into hg 19(=grch37
-    or ensembl.EnsemblGenome('Homo_sapiens',58+)"""
-    return LiftOver().get_convert_func("hg17ToHg19")
-
-
-def mm8_to_mm9():
-    """Map a mouse rev. 8 genome to rev 9
-    """
-    return LiftOver().get_convert_func("mm8ToMm9")
-
-
-def mm8_to_mm10(filter_to_these_chromosomes=None):
-    """Map a mouse rev. 8 genome to rev 10
-    """
-    return LiftOver().get_convert_func(
-        "mm8ToMm10", filter_to_these_chromosomes=filter_to_these_chromosomes
-    )
-
-
-def mm9_to_mm10():
-    """Map a mouse rev. 9 genome to rev 10
-    """
-    return LiftOver().get_convert_func("mm9ToMm10")
 
 
 def cookie_cutter(bp):
@@ -287,45 +220,16 @@ def cookie_cutter(bp):
 
     def convert(df):
         peak_lengths = df["stop"] - df["start"]
-        centers = np.array(df["start"] + peak_lengths / 2, dtype=np.int32)
-        new_starts = centers - bp / 2
+        centers = np.array(df["start"] + peak_lengths // 2, dtype=np.int32)
+        new_starts = centers - bp // 2
         new_stops = new_starts + bp
         new_starts[new_starts < 0] = 0
         res = pd.DataFrame({"chr": df["chr"], "start": new_starts, "stop": new_stops})
-        if "strand" in df.columns:
+        if "strand" in df.columns: # pragma: no branch
             res["strand"] = df["strand"]
         return res
 
     return convert, [], bp
-
-
-def cookie_cutter_asym(
-    summit_annotator,
-    bp_minus,
-    bp_plus,
-    retain_additional_columns=None,
-    retain_alternate=None,
-):
-    """ transform all their binding regions to - bp_minus ... + bp_plus
-    around the position given in column_name.
-    """
-
-    def convert(df):
-        centers = df["start"] + df[summit_annotator.column_name]
-        new_starts = centers - bp_minus
-        new_stops = centers + bp_plus
-        new_starts[new_starts < 0] = 0
-        ret = {"chr": df["chr"], "start": new_starts, "stop": new_stops}
-        if retain_additional_columns is not None:
-            for col_name in retain_additional_columns:
-                ret[col_name] = df[col_name]
-        if retain_alternate is not None:
-            for col_name in retain_alternate:
-                ret[retain_alternate[col_name]] = df[col_name]
-        df = pd.DataFrame(ret)
-        return df
-
-    return convert, [], (bp_plus + bp_minus)
 
 
 def cookie_summit(summit_annotator, bp, drop_those_outside_chromosomes=False):
@@ -336,7 +240,7 @@ def cookie_summit(summit_annotator, bp, drop_those_outside_chromosomes=False):
     """
 
     def do_summits(df):
-        summit_col = summit_annotator.column_name
+        summit_col = summit_annotator.columns[0]
         res = {
             "chr": df["chr"],
             "start": df["start"] + df[summit_col].astype(int) - bp // 2,
@@ -345,35 +249,8 @@ def cookie_summit(summit_annotator, bp, drop_those_outside_chromosomes=False):
         res = pd.DataFrame(res)
         if drop_those_outside_chromosomes:
             res = res[res["start"] >= 0]
-        return res
-
-    return do_summits, [summit_annotator], (bp, drop_those_outside_chromosomes)
-
-
-def cookie_summit_alternative_column_name(
-    summit_annotator,
-    bp,
-    drop_those_outside_chromosomes=False,
-    #alternative_column_name=None,
-):
-    """ transform all their binding regions to -1/2 * bp ... 1/2 * bp centered
-    around the summit (so pass in the final size of the region)
-
-    if @drop_those_outside_chromosomes is set, regions < 0 are dropped
-    """
-
-    def do_summits(df):
-        summit_col = summit_annotator.column_name
-        #if alternative_column_name is not None: # pragma: no cover - not sure when this is needd at all?
-            #summit_col = alternative_column_name
-        res = {
-            "chr": df["chr"],
-            "start": df["start"] + df[summit_col] - bp / 2,
-            "stop": df["start"] + df[summit_col] + 1 + bp / 2,
-        }
-        res = pd.DataFrame(res)
-        if drop_those_outside_chromosomes:
-            res = res[res["start"] >= 0]
+        else:
+            res = res.assign(start = res['start'].clip(lower=0))
         return res
 
     return do_summits, [summit_annotator], (bp, drop_those_outside_chromosomes)

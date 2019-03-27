@@ -543,9 +543,9 @@ class TestGenomicRegionsLoading:
         def sample_data():
             return pd.DataFrame(
                 {
-                    "chr": ["1", "2", "1", "3", "5", "1", "5"],
-                    "start": [10, 100, 1000, 10000, 100_000, 1005, 5000],
-                    "stop": [1010, 110, 1110, 11110, 111_110, 2000, 5050],
+                    "chr": ["1", "2", "1", "3", "5", "1", "5", "5", "5"],
+                    "start": [10, 100, 1000, 10000, 100_000, 1005, 5000, 6049, 6000],
+                    "stop": [1010, 110, 1110, 11110, 111_110, 2000, 5050, 6051, 6050],
                 }
             )
 
@@ -563,6 +563,42 @@ class TestGenomicRegionsLoading:
         assert a.df.iloc[2]["stop"] == 5050
         assert a.df.iloc[3]["start"] == 100_000
         assert a.df.iloc[3]["stop"] == 111_110
+
+    def test_on_overlap_drop_nested(self):
+        def sample_data():
+            return pd.DataFrame(
+                {
+                    "chr": ["1", "2", "1", "3", "5", "1", "5", "5", "5"],
+                    "start": [10, 100, 1000, 10000, 100_000, 1005, 5000, 6049, 6000],
+                    "stop": [1010, 110, 1110, 11110, 111_110, 2000, 5050, 6100, 6050],
+                }
+            )
+
+        a = regions.GenomicRegions(
+            "shu", sample_data, [], get_genome_chr_length(), on_overlap="drop"
+        )
+        force_load(a.load)
+        run_pipegraph()
+        assert len(a.df) == 4
+        assert a.df.iloc[0]["start"] == 100
+        assert a.df.iloc[0]["stop"] == 110
+        assert a.df.iloc[1]["start"] == 10000
+        assert a.df.iloc[1]["stop"] == 11110
+        assert a.df.iloc[2]["start"] == 5000
+        assert a.df.iloc[2]["stop"] == 5050
+        assert a.df.iloc[3]["start"] == 100_000
+        assert a.df.iloc[3]["stop"] == 111_110
+
+    def test_on_overlap_drop_empty(self):
+        def sample_data():
+            return pd.DataFrame({"chr": [], "start": [], "stop": []})
+
+        a = regions.GenomicRegions(
+            "shu", sample_data, [], get_genome_chr_length(), on_overlap="drop"
+        )
+        force_load(a.load)
+        run_pipegraph()
+        assert len(a.df) == 0
 
     def test_on_overlap_ignore(self):
         def sample_data():
@@ -1772,6 +1808,23 @@ class TestSetOperationsOnGenomicRegions:
         assert (c.df["start"] == [10]).all()
         assert (c.df["stop"] == [120]).all()
 
+    def test_from_common_in_at_least(self):
+        a = [(10, 100), (400, 450), (1000, 1200)]
+        b = [(80, 120), (600, 700), (1000, 1100)]
+        c = [(70, 110)]
+        a = self.sample_to_gr(a, "a")
+        b = self.sample_to_gr(b, "b")
+        c = self.sample_to_gr(c, "c")
+        d = regions.GenomicRegions_CommonInAtLeastX("d", [a, b, c], 3)
+        d.write()
+        e = regions.GenomicRegions_CommonInAtLeastX("e", [a, b, c], 2)
+        e.write()
+        run_pipegraph()
+        assert (d.df["start"] == [10]).all()
+        assert (d.df["stop"] == [120]).all()
+        assert (e.df["start"] == [10, 1000]).all()
+        assert (e.df["stop"] == [120, 1200]).all()
+
     def test_intersection_preserves_annos(self):
         a = [(10, 100), (400, 450)]
         ca1 = Constant("one", 1)
@@ -1909,6 +1962,19 @@ class TestSetOperationsOnGenomicRegions:
         run_pipegraph()
         assert a.overlap_basepair(b) == 20
         assert b.overlap_basepair(a) == 20
+
+    def test_overlap_basepairs_raise_on_overlaps(self):
+        a = [(10, 100), (400, 450)]
+        b = [(80, 120), (600, 700)]
+        a = self.sample_to_gr(a, "a", on_overlap="ignore")
+        b = self.sample_to_gr(b, "b")
+        a.load()
+        force_load(a.build_intervals())
+        b.load()
+        force_load(b.build_intervals())
+        run_pipegraph()
+        with pytest.raises(ValueError):
+            a.overlap_basepair(b)
 
     def test_overlap_basepairs_identical(self):
         a = [(10, 100), (400, 450)]
@@ -2171,7 +2237,6 @@ class TestFromXYZ:
         assert len(a.df) == 4
         assert (a.df["chr"] == ["2", "3", "3", "3"]).all()
         assert (a.df["start"] == [662_743, 53968, 58681, 68187]).all()
-        print(a.df["score"])
         assert (
             a.df["score"]
             == [
@@ -2181,6 +2246,31 @@ class TestFromXYZ:
                 b"0.742024408736128",
             ]
         ).all()
+
+    def test_gff_with_name(self):
+        a = regions.GenomicRegions_FromGFF(
+            "shu",
+            data_path / "test_with_name.gff3",
+            get_genome_chr_length(),
+            filter_function=lambda entry: entry["source"]
+            == b"Regions_of_sig_enrichment",
+            comment_char="#",
+        )
+        force_load(a.load())
+        run_pipegraph()
+        assert len(a.df) == 4
+        assert (a.df["chr"] == ["2", "3", "3", "3"]).all()
+        assert (a.df["start"] == [662_743, 53968, 58681, 68187]).all()
+        assert (
+            a.df["score"]
+            == [
+                b"-0.583140831299777",
+                b"0.41667200444801",
+                b"1.20483507668127",
+                b"0.742024408736128",
+            ]
+        ).all()
+        assert (a.df["name"] == ["reg5", "reg1", "reg2", "reg3"]).all()
 
     def test_gff_below_zero(self):
         b = regions.GenomicRegions_FromGFF(
@@ -2273,6 +2363,40 @@ class TestFromXYZ:
                 assert numpy.isnan(val)
             else:
                 assert round(abs(val - should[ii]), 7) == 0
+
+    def test_bed_without_score(self):
+        a = regions.GenomicRegions_FromBed(
+            "shu", data_path / "test_noscore.bed", get_genome_chr_length()
+        )
+        force_load(a.load())
+        run_pipegraph()
+        assert len(a.df) == 6
+        assert (a.df["chr"] == ["2", "2", "2", "3", "3", "3"]).all()
+        assert (
+            a.df["start"] == [356_591, 662_743, 1_842_875, 53968, 58681, 68187]
+        ).all()
+        assert not "score" in a.df.columns
+        assert (a.df["name"] == ["four", "five", "six", "one", "two", "three"]).all()
+
+    def test_bed_constant_name(self):
+        a = regions.GenomicRegions_FromBed(
+            "shu", data_path / "test_constant_name.bed", get_genome_chr_length()
+        )
+        force_load(a.load())
+        run_pipegraph()
+        assert len(a.df) == 6
+        assert (a.df["chr"] == ["2", "2", "2", "3", "3", "3"]).all()
+        assert (
+            a.df["start"] == [356_591, 662_743, 1_842_875, 53968, 58681, 68187]
+        ).all()
+        assert not "name" in a.df.columns
+
+    def test_empty_bed(self):
+        with RaisesDirectOrInsidePipegraph(ValueError):
+            a = regions.GenomicRegions_FromBed(
+                "shu", data_path / "test_empty.bed", get_genome_chr_length()
+            )
+            force_load(a.load())
 
     def test_bed_without_score(self):
         a = regions.GenomicRegions_FromBed(
