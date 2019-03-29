@@ -15,11 +15,11 @@ import dppd_plotnine  # noqa:F401
 import mbf_genomics.regions as regions
 from mbf_genomics.annotator import Constant, Annotator
 
+from mbf_qualitycontrol.testing import assert_image_equal 
 from .shared import (
     get_genome,
     get_genome_chr_length,
     force_load,
-    assert_image_equal,
     inside_ppg,
     run_pipegraph,
     RaisesDirectOrInsidePipegraph,
