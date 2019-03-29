@@ -17,4 +17,3 @@ def test_read_pandas_csv_in_xls(new_pipegraph):
     df.to_csv("shu.something", index=False)
     with pytest.raises(ValueError):
         read_pandas("shu.something")
-

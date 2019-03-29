@@ -1,9 +1,11 @@
 import pytest
+from pathlib import Path
 import numpy as np
 import pandas as pd
 from mbf_genomics.genes.anno_tag_counts import IntervalStrategyGene
 from mbf_genomics.genes import Genes, anno_tag_counts
 from .shared import MockGenome, force_load, run_pipegraph, RaisesDirectOrInsidePipegraph
+import pysam
 
 
 class MockRead(object):
@@ -82,43 +84,54 @@ class MockBam(object):
                 else:
                     raise ValueError("Invalid mode")
 
-
-class MockBamFixed(object):
-    def __init__(self, reads):
-        """Each read is a
+def MockBamFixed(reads):
+    """Each read is a
             dict: strand, regions, tags, qname, is_read1
-        """
-        ii = 0
-        for read in reads:
-            if "qname" not in read:
-                name = "read_%i" % ii
-                ii = +1
-                read["qname"] = name
-            if "chr" not in read:
-                read["chr"] = "1"
-            if "tags" not in read:
-                read["tags"] = {}
-            if "is_read1" not in read:
-                read["is_read1"] = True
-        self.reads = reads
-
-    def fetch(self, chr, start, stop):
-        for read in self.reads:
-            for region_start, region_stop in read["regions"]:
-                x1 = start
-                x2 = stop
-                y1 = region_start
-                y2 = region_stop
-                if x1 <= y2 and y1 <= x2:  # if the read hits the query region...
-                    yield MockReadFixed(
-                        read["chr"],
-                        read["regions"],
-                        read["strand"],
-                        read["tags"],
-                        read["qname"],
-                        read["is_read1"],
-                    )
-                    break
+    """
+    ii = 0
+    for read in reads:
+        if "qname" not in read:
+            name = "read_%i" % ii
+            ii = +1
+            read["qname"] = name
+        if "chr" not in read:
+            read["chr"] = "1"
+        if "tags" not in read:
+            read["tags"] = {}
+        if "is_read1" not in read:
+            read["is_read1"] = True
+    chrs = sorted(set([r['chr'] for r in reads]))
+    fn = 'mock.bam'
+    if Path(fn).exists():
+        Path(fn).unlink()
+    bam = pysam.Samfile(fn, 'wb', 
+                        reference_names = chrs,
+                        reference_lengths = [100000] * len(chrs))
+    for read in reads:
+        al = pysam.AlignedSegment()
+        al.query_name = read['qname']
+        read_len = sum([x[1] - x[0] for x in read['regions']])
+        al.query_sequence = 'A' * read_len
+        al.reference_id = bam.references.index(read['chr'])
+        al.is_read1 = read['is_read1']
+        al.is_reverse = read['strand'] == -1
+        t = [tuple(x) for x in read['tags'].items()]
+        al.tags = t 
+        al.pos = read['regions'][0][0]
+        last_stop = None
+        cigar = []
+        for start, stop in read['regions']:
+            if last_stop:
+                cigar.append((2, start - last_stop))
+            last_stop = stop
+            cigar.append((0, stop -start))
+        al.cigar = tuple(cigar)
+        bam.write(al)
+    bam.close()
+    pysam.sort('-o', 'mock_sorted.bam', fn)
+    pysam.index('mock_sorted.bam')
+    res =  pysam.Samfile('mock_sorted.bam', 'rb')
+    return res
 
 
 class FakePaireEndBam(object):
