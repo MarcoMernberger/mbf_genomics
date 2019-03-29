@@ -8,81 +8,55 @@ from .shared import MockGenome, force_load, run_pipegraph, RaisesDirectOrInsideP
 import pysam
 
 
-class MockRead(object):
-    """a fake alignedsegmenct ala pysam"""
-
-    def __init__(self, chr, pos, strand, qname, is_read1=True, tags={"NH": 1}):
-        self.pos = pos
-        self.chr = chr
-        self.is_reverse = strand != 1
-        self.is_read1 = is_read1
-        self.is_read2 = not is_read1
-        self.qname = qname
-        self.tags = tags
-
-    def get_blocks(self):
-        yield (self.pos, self.pos + 1)
-
-    def get_tag(self, tag):
-        return self.tags[tag]
-
-
-class MockReadFixed(object):
-    def __init__(self, chr, regions, strand, tags, qname, is_read1=True):
-        self.chr = chr
-        self.pos = min([x[0] for x in regions])
-        print(regions)
-        self.regions = list(sorted(regions))
-        self.is_reverse = strand != 1
-        self.is_read1 = is_read1
-        self.is_read2 = not is_read1
-        self.qname = qname
-        self.tags = tags
-
-    def get_blocks(self):
-        for x, y in self.regions:
-            yield (x, y)
-
-    def get_tag(self, name):
-        return self.tags[name]
-
-
-class MockBam(object):
+def MockBam(chr, length, mode=1):
     """a number of reads of length 1 at any position!"""
+    chrs = [chr]
+    fn = "mock.bam"
+    bam = pysam.Samfile(
+        fn, "wb", reference_names=chrs, reference_lengths=[100000] * len(chrs)
+    )
 
-    def __init__(self, chr, length, mode=1):
-        self.chr = chr
-        self.length = length
-        self.mode = mode
+    def write_read(pos, strand, name):
+        al = pysam.AlignedSegment()
+        al.pos = pos
+        al.reference_id = 0
+        al.is_reverse = strand == -1
+        al.query_name = name
+        al.seq = "A"
+        al.cigar = ((0, 1),)
+        al.tags = (("NH", 1),)
+        bam.write(al)
 
-    def fetch(self, chr, start, stop):
-        if chr == self.chr:
-            for ii in range(start, stop):
-                if self.mode == 0:
-                    yield MockRead(chr, ii, 1, "fw_%i" % ii)
-                elif self.mode == 1:
-                    yield MockRead(chr, ii, 1, "fw_%i" % ii)
-                    yield MockRead(chr, ii, -1, "rv_%i" % ii)
-                elif self.mode == 2:
-                    yield MockRead(chr, ii, 1, "fw_%i" % ii)
-                    yield MockRead(chr, ii, -1, "rv_%i" % ii)
-                    yield MockRead(chr, ii, -1, "rv2_%i" % ii)
-                elif (
-                    self.mode == 3
-                ):  # good for testing the 'count one read in one gene once'
-                    yield MockRead(chr, ii, 1, "fw_%i" % ii)
-                    yield MockRead(chr, ii, 1, "fw_%i" % ii)
-                    yield MockRead(chr, ii, 1, "fw_%i" % ii)
-                    yield MockRead(chr, ii, 1, "fw_%i" % ii)
-                    yield MockRead(chr, ii, -1, "rv2_%i" % ii)
-                elif self.mode == 4:
-                    yield MockRead(chr, ii, 1, "fw_%i_a" % ii)
-                    yield MockRead(chr, ii, 1, "fw_%i_b" % ii)
-                    yield MockRead(chr, ii, 1, "fw_%i_c" % ii)
-                    yield MockRead(chr, ii, 1, "fw_%i_d" % ii)
-                    yield MockRead(chr, ii, -1, "rv2_%i_a" % ii)
-                else:
-                    raise ValueError("Invalid mode")
+    for ii in range(0, length):
+        if mode == 0:
+            write_read(ii, 1, "fw_%i" % ii)
+        elif mode == 1:
+            write_read(ii, 1, "fw_%i" % ii)
+            write_read(ii, -1, "rv_%i" % ii)
+        elif mode == 2:
+            write_read(ii, 1, "fw_%i" % ii)
+            write_read(ii, -1, "rv_%i" % ii)
+            write_read(ii, -1, "rv2_%i" % ii)
+        elif mode == 3:  # good for testing the 'count one read in one gene once'
+            write_read(ii, 1, "fw_%i" % ii)
+            write_read(ii, 1, "fw_%i" % ii)
+            write_read(ii, 1, "fw_%i" % ii)
+            write_read(ii, 1, "fw_%i" % ii)
+            write_read(ii, -1, "rv2_%i" % ii)
+        elif mode == 4:
+            write_read(ii, 1, "fw_%i_a" % ii)
+            write_read(ii, 1, "fw_%i_b" % ii)
+            write_read(ii, 1, "fw_%i_c" % ii)
+            write_read(ii, 1, "fw_%i_d" % ii)
+            write_read(ii, -1, "rv2_%i_a" % ii)
+        else:
+            raise ValueError("Invalid mode")
+    bam.close()
+    pysam.sort("-o", "mock_sorted.bam", fn)
+    pysam.index("mock_sorted.bam")
+    res = pysam.Samfile("mock_sorted.bam", "rb")
+    return res
+
 
 def MockBamFixed(reads):
     """Each read is a
@@ -100,55 +74,71 @@ def MockBamFixed(reads):
             read["tags"] = {}
         if "is_read1" not in read:
             read["is_read1"] = True
-    chrs = sorted(set([r['chr'] for r in reads]))
-    fn = 'mock.bam'
+    chrs = sorted(set([r["chr"] for r in reads]))
+    fn = "mock.bam"
     if Path(fn).exists():
         Path(fn).unlink()
-    bam = pysam.Samfile(fn, 'wb', 
-                        reference_names = chrs,
-                        reference_lengths = [100000] * len(chrs))
+    bam = pysam.Samfile(
+        fn, "wb", reference_names=chrs, reference_lengths=[100000] * len(chrs)
+    )
     for read in reads:
         al = pysam.AlignedSegment()
-        al.query_name = read['qname']
-        read_len = sum([x[1] - x[0] for x in read['regions']])
-        al.query_sequence = 'A' * read_len
-        al.reference_id = bam.references.index(read['chr'])
-        al.is_read1 = read['is_read1']
-        al.is_reverse = read['strand'] == -1
-        t = [tuple(x) for x in read['tags'].items()]
-        al.tags = t 
-        al.pos = read['regions'][0][0]
+        al.query_name = read["qname"]
+        read_len = sum([x[1] - x[0] for x in read["regions"]])
+        al.query_sequence = "A" * read_len
+        al.reference_id = bam.references.index(read["chr"])
+        al.is_read1 = read["is_read1"]
+        al.is_reverse = read["strand"] == -1
+        t = [tuple(x) for x in read["tags"].items()]
+        al.tags = t
+        al.pos = read["regions"][0][0]
         last_stop = None
         cigar = []
-        for start, stop in read['regions']:
+        for start, stop in read["regions"]:
             if last_stop:
                 cigar.append((2, start - last_stop))
             last_stop = stop
-            cigar.append((0, stop -start))
+            cigar.append((0, stop - start))
         al.cigar = tuple(cigar)
         bam.write(al)
     bam.close()
-    pysam.sort('-o', 'mock_sorted.bam', fn)
-    pysam.index('mock_sorted.bam')
-    res =  pysam.Samfile('mock_sorted.bam', 'rb')
+    pysam.sort("-o", "mock_sorted.bam", fn)
+    pysam.index("mock_sorted.bam")
+    res = pysam.Samfile("mock_sorted.bam", "rb")
     return res
 
 
-class FakePaireEndBam(object):
-    def __init__(self, chr, length, reverse=False):
-        self.chr = chr
-        self.length = length
-        self.reverse = reverse
+def FakePaireEndBam(chr, length, reverse=False):
+    chrs = [chr]
+    fn = "mock.bam"
+    bam = pysam.Samfile(
+        fn, "wb", reference_names=chrs, reference_lengths=[100000] * len(chrs)
+    )
 
-    def fetch(self, chr, start, stop):
-        if chr == self.chr:
-            for ii in range(start, stop):
-                if not self.reverse:
-                    yield MockRead(chr, ii, 1, "read_%i" % ii, is_read1=True)
-                    yield MockRead(chr, ii, -1, "read_%i" % ii, is_read1=False)
-                else:
-                    yield MockRead(chr, ii, 1, "read_%i" % ii, is_read1=False)
-                    yield MockRead(chr, ii, -1, "read_%i" % ii, is_read1=True)
+    def write_read(pos, strand, name):
+        al = pysam.AlignedSegment()
+        al.pos = pos
+        al.reference_id = 0
+        al.is_reverse = strand == -1
+        al.query_name = name
+        al.seq = "A"
+        al.cigar = ((0, 1),)
+        al.tags = (("NH", 1),)
+        bam.write(al)
+
+    for ii in range(0, length):
+        if not reverse:
+            write_read(ii, 1, "read_%i" % ii, is_read1=True)
+            write_read(ii, -1, "read_%i" % ii, is_read1=False)
+        else:
+            write_read(ii, 1, "read_%i" % ii, is_read1=False)
+            write_read(ii, -1, "read_%i" % ii, is_read1=True)
+
+    bam.close()
+    pysam.sort("-o", "mock_sorted.bam", fn)
+    pysam.index("mock_sorted.bam")
+    res = pysam.Samfile("mock_sorted.bam", "rb")
+    return res
 
 
 class MockLane(object):
