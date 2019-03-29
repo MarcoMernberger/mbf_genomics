@@ -127,7 +127,9 @@ def MockGenome(df_genes, df_transcripts=None, chr_lengths=None):
         starts = []
         stops = []
         if not "strand" in df_genes:
-            df_genes = df_genes.assign(strand=1)
+            tes_larger = df_genes['tes'] > df_genes['tss']
+            strand = tes_larger.replace({True: 1, False: -1})
+            df_genes = df_genes.assign(strand=strand)
         for idx, row in df_genes.iterrows():
             starts.append(min(row["tss"], row["tes"]))
             stops.append(max(row["tss"], row["tes"]))

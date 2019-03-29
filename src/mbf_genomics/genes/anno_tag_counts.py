@@ -30,7 +30,7 @@ class _CounterStrategyBase:
 
 class CounterStrategyStranded(_CounterStrategyBase):
     """This counter fetches() all reads on one chromosome at once, then matches them to the respective intervals
-    defined by self.strategy.get_intervals"""
+    defined by self.strategy.get_interval_trees"""
 
     def __init__(self):
         self.disable_sanity_check = False
@@ -44,7 +44,7 @@ class CounterStrategyStranded(_CounterStrategyBase):
         # reads may hit multiple genes (think overlapping genes, where each could have generated the read)
         # multi aligned reads may count for multiple genes
         # but not for the same gene multiple times
-        tree_forward, tree_reverse, gene_to_no = interval_strategy.get_intervals(
+        tree_forward, tree_reverse, gene_to_no = interval_strategy.get_interval_trees(
             genome, chr
         )
 
@@ -114,8 +114,9 @@ class CounterStrategyStranded(_CounterStrategyBase):
 
 
 class CounterStrategyUnstranded(_CounterStrategyBase):
-    """This counter fetches() all reads on one chromosome at once, then matches them to the respective intervals
-    defined by self.get_intervals"""
+    """This counter fetches() all reads on one chromosome at once, 
+    then matches them to the respective intervals
+    defined by self.get_interval_trees"""
 
     def count_gene_reads_on_chromosome(
         self, interval_strategy, genome, samfile, chr, reverse=False
@@ -126,7 +127,7 @@ class CounterStrategyUnstranded(_CounterStrategyBase):
         # reads may hit multiple genes (think overlapping genes, where each could have generated the read)
         # multi aligned reads may count for multiple genes
         # but not for the same gene multiple times
-        tree_forward, tree_reverse, gene_to_no = interval_strategy.get_intervals(
+        tree_forward, tree_reverse, gene_to_no = interval_strategy.get_interval_trees(
             genome, chr
         )
 
@@ -171,7 +172,7 @@ class CounterStrategyWeightedStranded(_CounterStrategyBase):
         lookup = collections.defaultdict(int)
         read_storage = {}
         for chr, length in genome.get_chromosome_lengths().items():
-            tree_forward, tree_reverse, gene_to_no = interval_strategy.get_intervals(
+            tree_forward, tree_reverse, gene_to_no = interval_strategy.get_interval_trees(
                 genome, chr
             )
             no_to_gene = dict((v, k) for (k, v) in gene_to_no.items())
@@ -259,7 +260,7 @@ class _IntervalStrategy:
 
             return Dummy()
 
-    def get_intervals(self, genome, chr):
+    def get_interval_trees(self, genome, chr):
         if not ppg.inside_ppg() and not hasattr(genome, self.key):
             self.do_load(genome)
         return getattr(genome, self.key)[0][chr]
@@ -267,8 +268,38 @@ class _IntervalStrategy:
     def get_interval_lengths_by_gene(self, genome):
         return getattr(genome, self.key)[1]
 
-    def do_load(self, genome):
+    def _get_interval_tuples_by_chr(self, genome):  # pragma: no cover
         raise NotImplementedError()
+
+    def do_load(self, genome):
+        import bx.intervals
+
+        by_chr = self._get_interval_tuples_by_chr(genome)
+        _bx_gene_intervals = {}
+        length_by_gene = {}
+        for chr, tups in by_chr.items():
+            tree_forward = bx.intervals.IntervalTree()
+            tree_reverse = bx.intervals.IntervalTree()
+            gene_to_no = {}
+            ii = 0
+            for tup in tups:  # stable_id, strand, [starts], [stops]
+                length = 0
+                for start, stop in zip(tup[2], tup[3]):
+                    if tup[1] == 1:
+                        tree_forward.insert_interval(
+                            bx.intervals.Interval(start, stop, ii)
+                        )
+                    else:
+                        tree_reverse.insert_interval(
+                            bx.intervals.Interval(start, stop, ii)
+                        )
+                    length += stop - start
+                gene_stable_id = tup[0]
+                gene_to_no[gene_stable_id] = ii
+                length_by_gene[gene_stable_id] = length
+                ii += 1
+            _bx_gene_intervals[chr] = tree_forward, tree_reverse, gene_to_no
+        setattr(genome, self.key, (_bx_gene_intervals, length_by_gene))
 
 
 class IntervalStrategyGene(_IntervalStrategy):
@@ -276,31 +307,12 @@ class IntervalStrategyGene(_IntervalStrategy):
 
     key = "_bx_gene_intervals"
 
-    def do_load(self, genome):
-        import bx.intervals
-
-        _bx_gene_intervals = {}
+    def _get_interval_tuples_by_chr(self, genome):
+        result = {chr: [] for chr in genome.get_chromosome_lengths()}
         gene_info = genome.df_genes
-        length_by_gene = {}
-        for chr in genome.get_chromosome_lengths():
-            tree_forward = bx.intervals.IntervalTree()
-            tree_reverse = bx.intervals.IntervalTree()
-            gene_to_no = {}
-            ii = 0
-            for row in gene_info[gene_info["chr"] == chr].iterrows():
-                start = min(row[1]["tss"], row[1]["tes"])
-                stop = max(row[1]["tss"], row[1]["tes"])
-                strand = 1 if row[1]["tss"] < row[1]["tes"] else -1
-                if strand == 1:
-                    tree_forward.insert_interval(bx.intervals.Interval(start, stop, ii))
-                else:
-                    tree_reverse.insert_interval(bx.intervals.Interval(start, stop, ii))
-                gene_stable_id = row[0]
-                gene_to_no[gene_stable_id] = ii
-                length_by_gene[gene_stable_id] = stop - start
-                ii += 1
-            _bx_gene_intervals[chr] = tree_forward, tree_reverse, gene_to_no
-        setattr(genome, self.key, (_bx_gene_intervals, length_by_gene))
+        for tup in gene_info[["chr", "start", "stop", "strand"]].itertuples():
+            result[tup.chr].append((tup[0], tup.strand, [tup.start], [tup.stop]))
+        return result
 
 
 class IntervalStrategyExon(_IntervalStrategy):
@@ -308,37 +320,14 @@ class IntervalStrategyExon(_IntervalStrategy):
 
     key = "_bx_exon_intervals"
 
-    def do_load(self, genome):
-        import bx.intervals
-
-        _bx_exon_intervals = {}
-        length_by_gene = collections.Counter()
-        for chr in genome.get_chromosome_lengths():
-            tree_forward = bx.intervals.IntervalTree()
-            tree_reverse = bx.intervals.IntervalTree()
-            gene_to_no = {}
-            ii = -1
-            last_stable_id = ""
-            exon_info = genome.df_exons
-            exon_info = merge_intervals(exon_info)
-            exon_info = exon_info[exon_info.chr == chr]
-            for rowno, row in exon_info.iterrows():
-                if last_stable_id != row["gene_stable_id"]:
-                    ii += 1
-                    last_stable_id = row["gene_stable_id"]
-                    gene_to_no[last_stable_id] = ii
-                if row["strand"] == 1:
-                    tree_forward.insert_interval(
-                        bx.intervals.Interval(row["start"], row["stop"], ii)
-                    )
-                else:
-                    tree_reverse.insert_interval(
-                        bx.intervals.Interval(row["start"], row["stop"], ii)
-                    )
-                length_by_gene[row["gene_stable_id"]] += row["stop"] - row["start"]
-
-            _bx_exon_intervals[chr] = tree_forward, tree_reverse, gene_to_no
-        setattr(genome, self.key, (_bx_exon_intervals, length_by_gene))
+    def _get_interval_tuples_by_chr(self, genome):
+        result = {chr: [] for chr in genome.get_chromosome_lengths()}
+        for gene in genome.genes.values():
+            exons = gene.exons_merged
+            result[gene.chr].append(
+                (gene.gene_stable_id, gene.strand, exons[0], exons[1])
+            )
+        return result
 
 
 def get_all_gene_exons_protein_coding(genome):
@@ -355,42 +344,14 @@ class IntervalStrategyExonSmart(_IntervalStrategy):
 
     key = "_bx_exon_smart_intervals_protein_coding"
 
-    def do_load(self, genome):
-        import bx.intervals
-
-        _bx_exon_intervals = {}
-        length_by_gene = collections.Counter()
-        exon_info_all = get_all_gene_exons_protein_coding(
-            genome
-        )  # these are already merged per gene
-        exon_info_by_chr = {chr: [] for chr in genome.get_chromosome_lengths()}
-        for tup in exon_info_all:
-            exon_info_by_chr[tup[1]].append(tup)
-
-
-        for chr in genome.get_chromosome_lengths():
-            tree_forward = bx.intervals.IntervalTree()
-            tree_reverse = bx.intervals.IntervalTree()
-            gene_to_no = {}
-            ii = -1
-            last_stable_id = ""
-
-            exon_info = exon_info_by_chr[chr]
-            for gene_stable_id, chr, strand, exons in exon_info:
-                ii += 1
-                gene_to_no[gene_stable_id] = ii
-                if strand == 1:
-                    t = tree_forward
-                else:
-                    t = tree_reverse
-                for start, stop in zip(*exons):
-                    t.insert_interval(
-                        bx.intervals.Interval(start, stop, ii)
-                    )
-                    length_by_gene[gene_stable_id] += stop - start
-
-            _bx_exon_intervals[chr] = tree_forward, tree_reverse, gene_to_no
-        setattr(genome, self.key, (_bx_exon_intervals, length_by_gene))
+    def _get_interval_tuples_by_chr(self, genome):
+        result = {chr: [] for chr in genome.get_chromosome_lengths()}
+        for g in genome.genes.values():
+            e = g.exons_protein_coding_merged
+            if len(e[0]) == 0:
+                e = g.exons_merged
+            result[g.chr].append((g.gene_stable_id, g.strand, e[0], e[1]))
+        return result
 
 
 # Now the actual tag count annotators
