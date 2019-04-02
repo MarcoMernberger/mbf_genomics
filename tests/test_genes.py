@@ -23,6 +23,7 @@ from .shared import (
 class TestGenesLoadingPPGOnly:
     def test_loading_from_genome_is_singletonic(self):
         genome = get_genome()
+        print(genome)
         genesA = genes.Genes(genome)
         genesB = genes.Genes(genome)
         assert genesA is genesB

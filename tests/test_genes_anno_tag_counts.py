@@ -16,7 +16,7 @@ def MockBam(chr, length, mode=1):
         fn, "wb", reference_names=chrs, reference_lengths=[100000] * len(chrs)
     )
 
-    def write_read(pos, strand, name):
+    def write_read(pos, strand, name, nh=1):
         al = pysam.AlignedSegment()
         al.pos = pos
         al.reference_id = 0
@@ -24,7 +24,7 @@ def MockBam(chr, length, mode=1):
         al.query_name = name
         al.seq = "A"
         al.cigar = ((0, 1),)
-        al.tags = (("NH", 1),)
+        al.tags = (("NH", nh),)
         bam.write(al)
 
     for ii in range(0, length):
@@ -38,10 +38,10 @@ def MockBam(chr, length, mode=1):
             write_read(ii, -1, "rv_%i" % ii)
             write_read(ii, -1, "rv2_%i" % ii)
         elif mode == 3:  # good for testing the 'count one read in one gene once'
-            write_read(ii, 1, "fw_%i" % ii)
-            write_read(ii, 1, "fw_%i" % ii)
-            write_read(ii, 1, "fw_%i" % ii)
-            write_read(ii, 1, "fw_%i" % ii)
+            write_read(ii, 1, "fw_%i" % ii, 4)
+            write_read(ii, 1, "fw_%i" % ii, 4)
+            write_read(ii, 1, "fw_%i" % ii, 4)
+            write_read(ii, 1, "fw_%i" % ii, 4)
             write_read(ii, -1, "rv2_%i" % ii)
         elif mode == 4:
             write_read(ii, 1, "fw_%i_a" % ii)
@@ -1605,7 +1605,6 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        interval_strategy.load_intervals(genome).callback()
         lookup = count_strategy.count_reads(interval_strategy, genome, bam)
         assert lookup["FakeA"] == 1
         assert lookup["FakeB"] == 0
@@ -1634,7 +1633,6 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        interval_strategy.load_intervals(genome).callback()
 
         with pytest.raises(KeyError):
             count_strategy.count_reads(interval_strategy, genome, bam)
@@ -1670,7 +1668,6 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        interval_strategy.load_intervals(genome).callback()
 
         with pytest.raises(ValueError):
             count_strategy.count_reads(interval_strategy, genome, bam)
@@ -1710,7 +1707,6 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        interval_strategy.load_intervals(genome).callback()
 
         def inner():
             count_strategy.count_reads(interval_strategy, genome, bam)
@@ -1762,7 +1758,6 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        interval_strategy.load_intervals(genome).callback()
 
         def inner():
             count_strategy.count_reads(interval_strategy, genome, bam)
@@ -1812,7 +1807,6 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        interval_strategy.load_intervals(genome).callback()
         lookup = count_strategy.count_reads(interval_strategy, genome, bam)
         assert lookup["FakeA"] == 0.5  #
         assert lookup["FakeB"] == 0.5
@@ -1859,7 +1853,6 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        interval_strategy.load_intervals(genome).callback()
         lookup = count_strategy.count_reads(interval_strategy, genome, bam)
         # how am I ever going to achieve this?
         assert lookup["FakeA"] == 1
@@ -1906,7 +1899,6 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        interval_strategy.load_intervals(genome).callback()
         lookup = count_strategy.count_reads(interval_strategy, genome, bam)
         assert lookup["FakeA"] == 1
         assert lookup["FakeB"] == 0
@@ -1958,7 +1950,6 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        interval_strategy.load_intervals(genome).callback()
         lookup = count_strategy.count_reads(interval_strategy, genome, bam)
         assert lookup["FakeA"] == 0.5
         assert lookup["FakeB"] == 0.5
@@ -2016,7 +2007,6 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        interval_strategy.load_intervals(genome).callback()
         lookup = count_strategy.count_reads(interval_strategy, genome, bam)
         assert lookup["FakeA"] == 1 / 3.0
         assert lookup["FakeB"] == 1 / 3.0
@@ -2049,7 +2039,6 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        interval_strategy.load_intervals(genome).callback()
         lookup = count_strategy.count_reads(interval_strategy, genome, bam)
         assert lookup["FakeA"] == 0.5
         assert lookup["FakeB"] == 0.5
@@ -2100,7 +2089,6 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        interval_strategy.load_intervals(genome).callback()
         lookup = count_strategy.count_reads(interval_strategy, genome, bam)
         assert lookup["FakeA"] == 0.5
         assert lookup["FakeB"] == 0.5
@@ -2164,7 +2152,6 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        interval_strategy.load_intervals(genome).callback()
         lookup = count_strategy.count_reads(interval_strategy, genome, bam)
         assert lookup["FakeA"] == 0.5  #
         assert lookup["FakeB"] == 0.5 + 1
@@ -2217,7 +2204,6 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        interval_strategy.load_intervals(genome).callback()
         lookup = count_strategy.count_reads(interval_strategy, genome, bam)
         assert lookup["FakeA"] == 0.5  #
         assert lookup["FakeB"] == 0.5 + 1
@@ -2272,7 +2258,6 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        interval_strategy.load_intervals(genome).callback()
         lookup = count_strategy.count_reads(interval_strategy, genome, bam)
         assert lookup["FakeA"] == 0.5  #
         assert lookup["FakeB"] == 0.5 + 1

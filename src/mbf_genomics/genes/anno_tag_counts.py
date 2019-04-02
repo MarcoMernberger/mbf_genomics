@@ -10,6 +10,7 @@ import pypipegraph as ppg
 import hashlib
 import pandas as pd
 from mbf_genomes.intervals import merge_intervals
+from pathlib import Path
 
 
 # ## Base classes and strategies - skip these if you just care about using TagCount annotators
@@ -26,6 +27,12 @@ class _CounterStrategyBase:
             )
         self.sanity_check(genome, lookup, bamfile, interval_strategy)
         return lookup
+
+    def extract_lookup(self, data):
+        """Adapter for count strategies that have different outputs
+        (e.g. one-hashmap-unstranded or two-hashmaps-one-forward-one-reversed)
+        """
+        return data
 
 
 class CounterStrategyStranded(_CounterStrategyBase):
@@ -113,6 +120,54 @@ class CounterStrategyStranded(_CounterStrategyBase):
             )
 
 
+class CounterStrategyStrandedRust:
+    def __init__(self):
+        self.disable_sanity_check = False
+
+    def count_reads(self, interval_strategy, genome, bamfile, reverse=False):
+        # bam_filename = bamfil
+        bam_filename = bamfile.filename.decode("utf-8")
+        bam_index_name = bamfile.index_filename
+        if bam_index_name is None:
+            bam_index_name = bam_filename + ".bai"
+        else:
+            bam_index_name = bam_index_name.decode("utf-8")
+
+        intervals = interval_strategy._get_interval_tuples_by_chr(genome)
+        gene_intervals = IntervalStrategyGene()._get_interval_tuples_by_chr(genome)
+        from mbf_bam import count_reads_stranded
+
+        res = count_reads_stranded(
+            bam_filename, bam_index_name, intervals, gene_intervals
+        )
+        self.sanity_check(res)
+        return res
+
+    def sanity_check(self, foward_and_reverse):
+        if self.disable_sanity_check:
+            return
+        error_count = 0
+        forward, reverse = foward_and_reverse
+        for gene_stable_id, forward_count in forward.items():
+            reverse_count = reverse.get(gene_stable_id, 0)
+            if (reverse_count > 100) and (reverse_count > forward_count * 1.1):
+                error_count += 1
+        if error_count > 0.1 * len(forward):
+            raise ValueError(
+                "Found at least %.2f%% of genes to have a reverse read count (%s) "
+                "above 110%% of the exon read count (and at least 100 tags). "
+                "This indicates that this lane should have been reversed before alignment. "
+                "Set reverse_reads=True on your Lane object"
+                % (100.0 * error_count / len(forward), self.__class__.__name__)
+            )
+
+    def extract_lookup(self, data):
+        """Adapter for count strategies that have different outputs
+        (e.g. one-hashmap-unstranded or two-hashmaps-one-forward-one-reversed)
+        """
+        return data[0]
+
+
 class CounterStrategyUnstranded(_CounterStrategyBase):
     """This counter fetches() all reads on one chromosome at once, 
     then matches them to the respective intervals
@@ -162,6 +217,27 @@ class CounterStrategyUnstranded(_CounterStrategyBase):
 
     def sanity_check(self, genome, lookup, bam_file, interval_strategy):
         pass  # no op
+
+
+class CounterStrategyUnstrandedRust(_CounterStrategyBase):
+    def count_reads(self, interval_strategy, genome, bamfile, reverse=False):
+        # bam_filename = bamfil
+        bam_filename = bamfile.filename.decode("utf-8")
+        bam_index_name = bamfile.index_filename
+        if bam_index_name is None:
+            bam_index_name = bam_filename + ".bai"
+        else:
+            bam_index_name = bam_index_name.decode("utf-8")
+
+        intervals = interval_strategy._get_interval_tuples_by_chr(genome)
+        gene_intervals = IntervalStrategyGene()._get_interval_tuples_by_chr(genome)
+        # chr -> [gene_id, strand, [start], [stops]
+        from mbf_bam import count_reads_unstranded
+
+        res = count_reads_unstranded(
+            bam_filename, bam_index_name, intervals, gene_intervals
+        )
+        return res
 
 
 class CounterStrategyWeightedStranded(_CounterStrategyBase):
@@ -233,50 +309,11 @@ class CounterStrategyWeightedStranded(_CounterStrategyBase):
 
 
 class _IntervalStrategy:
-    def deps(self, genome):
-        return [self.load_intervals(genome)]
-
-    def load_intervals(self, genome):
-        def load():
-            return self.do_load(genome)
-
-        if ppg.inside_ppg():
-            res = ppg.DataLoadingJob((genome.name + self.key), load).depends_on(
-                [
-                    genome.job_genes,
-                    genome.job_transcripts,
-                    ppg.FunctionInvariant(
-                        self.__class__.__name__ + "_load_func", type(self).do_load
-                    ),
-                ]
-            )
-            res.ignore_code_changes()  # n o sense in tracing that trivial load above
-            return res
-        else:
-
-            class Dummy:
-                def callback(inner_self):
-                    return self.do_load(genome)
-
-            return Dummy()
-
     def get_interval_trees(self, genome, chr):
-        if not ppg.inside_ppg() and not hasattr(genome, self.key):
-            self.do_load(genome)
-        return getattr(genome, self.key)[0][chr]
-
-    def get_interval_lengths_by_gene(self, genome):
-        return getattr(genome, self.key)[1]
-
-    def _get_interval_tuples_by_chr(self, genome):  # pragma: no cover
-        raise NotImplementedError()
-
-    def do_load(self, genome):
         import bx.intervals
 
         by_chr = self._get_interval_tuples_by_chr(genome)
         _bx_gene_intervals = {}
-        length_by_gene = {}
         for chr, tups in by_chr.items():
             tree_forward = bx.intervals.IntervalTree()
             tree_reverse = bx.intervals.IntervalTree()
@@ -296,10 +333,23 @@ class _IntervalStrategy:
                     length += stop - start
                 gene_stable_id = tup[0]
                 gene_to_no[gene_stable_id] = ii
-                length_by_gene[gene_stable_id] = length
                 ii += 1
-            _bx_gene_intervals[chr] = tree_forward, tree_reverse, gene_to_no
-        setattr(genome, self.key, (_bx_gene_intervals, length_by_gene))
+        return tree_forward, tree_reverse, gene_to_no
+
+    def get_interval_lengths_by_gene(self, genome):
+        by_chr = self._get_interval_tuples_by_chr(genome)
+        length_by_gene = {}
+        for chr, tups in by_chr.items():
+            for tup in tups:  # stable_id, strand, [starts], [stops]
+                gene_stable_id = tup[0]
+                length = 0
+                for start, stop in zip(tup[2], tup[3]):
+                    length += stop - start
+                length_by_gene[gene_stable_id] = length
+        return length_by_gene
+
+    def _get_interval_tuples_by_chr(self, genome):  # pragma: no cover
+        raise NotImplementedError()
 
 
 class IntervalStrategyGene(_IntervalStrategy):
@@ -325,17 +375,9 @@ class IntervalStrategyExon(_IntervalStrategy):
         for gene in genome.genes.values():
             exons = gene.exons_merged
             result[gene.chr].append(
-                (gene.gene_stable_id, gene.strand, exons[0], exons[1])
+                (gene.gene_stable_id, gene.strand, list(exons[0]), list(exons[1]))
             )
         return result
-
-
-def get_all_gene_exons_protein_coding(genome):
-    for g in genome.genes.values():
-        e = g.exons_protein_coding_merged
-        if len(e[0]) == 0:
-            e = g.exons_merged
-        yield (g.gene_stable_id, g.chr, g.strand, e)
 
 
 class IntervalStrategyExonSmart(_IntervalStrategy):
@@ -350,7 +392,7 @@ class IntervalStrategyExonSmart(_IntervalStrategy):
             e = g.exons_protein_coding_merged
             if len(e[0]) == 0:
                 e = g.exons_merged
-            result[g.chr].append((g.gene_stable_id, g.strand, e[0], e[1]))
+            result[g.chr].append((g.gene_stable_id, g.strand, list(e[0]), list(e[1])))
         return result
 
 
@@ -371,32 +413,63 @@ class _FastTagCounter(Annotator):
         self.cache_name = hashlib.md5(self.columns[0].encode("utf-8")).hexdigest()
         self.column_properties = {self.columns[0]: {"description": column_desc}}
         self.vid = aligned_lane.vid
+        self.register_qc()
 
     def calc(self, df):
-        lookup = {}
-        bam_file = self.aligned_lane.get_bam()
-        lookup = self.count_strategy.count_reads(
-            self.interval_strategy, self.genome, bam_file
-        )
+        if ppg.inside_ppg():
+            data = self._data
+        else:
+            data = self.calc_data()
+        lookup = self.count_strategy.extract_lookup(data)
         result = []
         for gene_stable_id in df["gene_stable_id"]:
-            result.append(lookup[gene_stable_id] if gene_stable_id in lookup else 0)
+            result.append(lookup.get(gene_stable_id, 0))
         result = np.array(result, dtype=np.float)
         return pd.Series(result)
 
-    def deps(self, genes):
-        return [self.aligned_lane.load()] + self.interval_strategy.deps(genes.genome)
+    def deps(self, _genes):
+        return [self.load_data()]
+
+    def calc_data(self):
+        bam_file = self.aligned_lane.get_bam()
+        return self.count_strategy.count_reads(
+            self.interval_strategy, self.genome, bam_file
+        )
+
+    def load_data(self):
+        cf = Path(ppg.util.global_pipegraph.cache_folder) / "FastTagCounters"
+        cf.mkdir(exist_ok=True)
+        return ppg.CachedAttributeLoadingJob(
+            cf / self.cache_name, self, "_data", self.calc_data
+        ).depends_on(self.aligned_lane.load())
+
+    def register_qc(self):
+        from mbf_qualitycontrol import register_qc, QCCallback
+
+        pass
 
 
 # ## Raw tag count annos for analysis usage
 
 
-class ExonSmartStranded(_FastTagCounter):
+class ExonSmartStrandedPython(_FastTagCounter):
     def __init__(self, aligned_lane):
         _FastTagCounter.__init__(
             self,
             aligned_lane,
             CounterStrategyStranded(),
+            IntervalStrategyExonSmart(),
+            "Exon, protein coding, stranded smart tag count %s",
+            "Tag count inside exons of protein coding transcripts (all if no protein coding transcripts) exons, correct strand only",
+        )
+
+
+class ExonSmartStrandedRust(_FastTagCounter):
+    def __init__(self, aligned_lane):
+        _FastTagCounter.__init__(
+            self,
+            aligned_lane,
+            CounterStrategyStrandedRust(),
             IntervalStrategyExonSmart(),
             "Exon, protein coding, stranded smart tag count %s",
             "Tag count inside exons of protein coding transcripts (all if no protein coding transcripts) exons, correct strand only",
@@ -415,12 +488,24 @@ class ExonSmartUnstranded(_FastTagCounter):
         )
 
 
-class ExonStranded(_FastTagCounter):
+class ExonStrandedPython(_FastTagCounter):
     def __init__(self, aligned_lane):
         _FastTagCounter.__init__(
             self,
             aligned_lane,
             CounterStrategyStranded(),
+            IntervalStrategyExon(),
+            "Exon, protein coding, stranded tag count %s",
+            "Tag count inside exons of protein coding transcripts (all if no protein coding transcripts) exons, correct strand only",
+        )
+
+
+class ExonStrandedRust(_FastTagCounter):
+    def __init__(self, aligned_lane):
+        _FastTagCounter.__init__(
+            self,
+            aligned_lane,
+            CounterStrategyStrandedRust(),
             IntervalStrategyExon(),
             "Exon, protein coding, stranded tag count %s",
             "Tag count inside exons of protein coding transcripts (all if no protein coding transcripts) exons, correct strand only",
@@ -451,7 +536,7 @@ class ExonSmartWeightedStranded(_FastTagCounter):
         )
 
 
-class GeneStranded(_FastTagCounter):
+class GeneStrandedPython(_FastTagCounter):
     def __init__(self, aligned_lane):
         _FastTagCounter.__init__(
             self,
@@ -463,7 +548,19 @@ class GeneStranded(_FastTagCounter):
         )
 
 
-class GeneUnstranded(_FastTagCounter):
+class GeneStrandedRust(_FastTagCounter):
+    def __init__(self, aligned_lane):
+        _FastTagCounter.__init__(
+            self,
+            aligned_lane,
+            CounterStrategyStrandedRust(),
+            IntervalStrategyGene(),
+            "Gene, stranded tag count %s",
+            "Tag count inside gene body (tss..tes), correct strand only",
+        )
+
+
+class GeneUnstrandedPython(_FastTagCounter):
     def __init__(self, aligned_lane):
         _FastTagCounter.__init__(
             self,
@@ -474,6 +571,24 @@ class GeneUnstranded(_FastTagCounter):
             "Tag count inside gene body (tss..tes), both strands",
         )
 
+
+class GeneUnstrandedRust(_FastTagCounter):
+    def __init__(self, aligned_lane):
+        _FastTagCounter.__init__(
+            self,
+            aligned_lane,
+            CounterStrategyUnstrandedRust(),
+            IntervalStrategyGene(),
+            "Gene unstranded tag count %s",
+            "Tag count inside gene body (tss..tes), both strands",
+        )
+
+
+# we are keeping the python ones for now as reference implementations
+GeneUnstranded = GeneUnstrandedRust
+GeneStranded = GeneStrandedRust
+ExonStranded = ExonStrandedRust
+ExonSmartStranded = ExonSmartStrandedRust
 
 # ## Normalizing annotators - convert raw tag counts into something normalized
 
@@ -642,8 +757,7 @@ class NormalizationFPKM(Annotator):
         }
 
     def deps(self, genes):
-        res = [self.raw_anno.interval_strategy.load_intervals(genes.genome)]
-        return res
+        return []
 
     def dep_annos(self):
         return [self.raw_anno]
@@ -681,11 +795,9 @@ class NormalizationFPKMBiotypes(Annotator):
         }
 
     def deps(self, genes):
-        res = [
-            self.raw_anno.interval_strategy.load_intervals(genes.genome),
-            ppg.ParameterInvariant(self.columns[0] + "_biotypes", list(self.biotypes)),
-        ]
-        return res
+        return ppg.ParameterInvariant(
+            self.columns[0] + "_biotypes", list(self.biotypes)
+        )
 
     def dep_annos(self):
         return [self.raw_anno]
