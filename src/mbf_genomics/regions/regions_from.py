@@ -9,9 +9,6 @@ from mbf_externals.util import to_string
 from ..util import read_pandas
 
 
-#TODO: move more of the functionality into nested_intervals
-
-
 def verify_same_genome(list_of_grs):
     if len(set([x.genome for x in list_of_grs])) > 1:
         raise ValueError("Mixing GenomicRegions from different genomes not supported")
@@ -357,13 +354,15 @@ def GenomicRegions_Common(
 
     verify_same_genome(list_of_grs)
     if ppg.inside_ppg():
-        deps = []
+        deps = [x.load() for x in list_of_grs]
         deps.append(
             ppg.ParameterInvariant(
                 name + "_input_grs", sorted([x.name for x in list_of_grs])
             )
         )
     else:
+        for x in list_of_grs:
+            x.load()
         deps = []
     vid = ("common", [x.vid for x in list_of_grs])
     return GenomicRegions(
@@ -389,27 +388,27 @@ def GenomicRegions_Invert(new_name, gr, summit_annotator=None, sheet_name="Inver
         """
 
     def do_load():
-        new_rows = []
-        chr_lens = gr.genome.get_chromosome_lengths()
-        chrs_covered = set()
-        # for chr, rows in itertools.groupby(self.df[['chr', 'start','stop']].iterrows(), lambda row: row['chr']):
-        for chr, rows in gr.df[["chr", "start", "stop"]].groupby("chr"):
-            chrs_covered.add(chr)
-            start = 0
-            for dummy_idx, row in rows.iterrows():
-                if start != row["start"]:
-                    new_rows.append({"chr": chr, "start": start, "stop": row["start"]})
-                start = row["stop"]
-            if start < chr_lens[chr]:
-                new_rows.append({"chr": chr, "start": start, "stop": chr_lens[chr]})
-        for (
-            chr
-        ) in (
-            chr_lens
-        ):  # we need to cover chromosomes that did not have a single entry so far.
-            if not chr in chrs_covered:
-                new_rows.append({"chr": chr, "start": 0, "stop": chr_lens[chr]})
-        return pd.DataFrame(new_rows)
+        from mbf_nested_intervals import IntervalSet
+        import itertools
+        df = gr.df
+        joined = []
+        for ii, (chr, start, stop) in enumerate(zip(df['chr'], df['start'], df['stop'])):
+            joined.append(((chr), start, stop, ii))
+        joined.sort(key=lambda tup: tup[0])
+ 
+        out = []
+        chr_lengths = gr.genome.get_chromosome_lengths()
+        seen = set()
+        for chr, sub_group in itertools.groupby(joined, lambda tup: tup[0]):
+            args = [x[1:] for x in sub_group]
+            iv = IntervalSet.from_tuples_with_id(args)
+            new_order = iv.invert(0, chr_lengths[chr]).to_numpy()
+            out.append(pd.DataFrame({"start": new_order[0], 'stop': new_order[1], 'chr': chr}))
+            seen.add(chr)
+        for chr in chr_lengths.keys() - seen:
+            out.append(pd.DataFrame({"start": [0], 'stop': [chr_lengths[chr]], 'chr': chr}))
+
+        return pd.concat(out)
 
     if gr.load_strategy.build_deps:
         deps = [
@@ -426,7 +425,7 @@ def GenomicRegions_Invert(new_name, gr, summit_annotator=None, sheet_name="Inver
         do_load,
         deps,
         gr.genome,
-        on_overlap="merge",
+        on_overlap="raise",
         summit_annotator=summit_annotator,
         vid=["invert"] + gr.vid,
         sheet_name=sheet_name,
@@ -490,6 +489,7 @@ def GenomicRegions_Difference(
             ),  # so if you swap out the gr, it's detected...
         ]
     else:
+        gr_b.load()
         deps = []
 
     result = GenomicRegions(
@@ -538,6 +538,7 @@ def GenomicRegions_Intersection(
         ]
     else:
         deps = []
+        gr_b.load()
 
     result = GenomicRegions(
         new_name,
@@ -646,7 +647,7 @@ def GenomicRegions_CommonInAtLeastX(
     if len(set([x.genome for x in list_of_grs])) > 1:
         raise ValueError("Can only merge GenomicRegions that have the same genome")
     if ppg.inside_ppg():
-        deps = []
+        deps = [x.load() for x in list_of_grs]
         deps.append(
             ppg.ParameterInvariant(
                 name + "_input_grs", sorted([x.name for x in list_of_grs])
@@ -654,6 +655,7 @@ def GenomicRegions_CommonInAtLeastX(
         )
     else:
         deps = []
+        [x.load() for x in list_of_grs]
     vid = ("common at least %i" % X, [x.vid for x in list_of_grs])
     return GenomicRegions(
         name,
@@ -725,12 +727,15 @@ def GenomicRegions_FilterRemoveOverlapping(
 
     if gr_a.load_strategy.build_deps:
         deps = [
+            [x.load() for x in other_grs],
             ppg.ParameterInvariant(
                 "GenomicRegions_%s_parents" % new_name,
                 (gr_a.name, [x.name for x in other_grs]),
             ),  # so if you swap out the gr, it's detected...
         ]
     else:
+        for other_gr in other_grs:
+            other_gr.load()
         deps = []
 
     return gr_a.filter(
@@ -761,13 +766,15 @@ def GenomicRegions_FilterToOverlapping(
         return keep
 
     if gr_a.load_strategy.build_deps:
-        deps =[
+        deps = [other_gr.load() for other_gr in other_grs] + [
             ppg.ParameterInvariant(
                 "GenomicRegions_%s_parents" % new_name,
                 (gr_a.name, [other_gr.name for other_gr in other_grs]),
             )  # so if you swap out the gr, it's detected...
         ]
     else:
+        for other_gr in other_grs:
+            other_gr.load()
         deps = []
 
     return gr_a.filter(

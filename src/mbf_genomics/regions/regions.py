@@ -718,7 +718,7 @@ class GenomicRegions(DelayedDataFrame):
                 % (self.genome, other_gr.genome)
             )
         if not self.load_strategy.build_deps:
-            other_gr.build_intervals()
+            other_gr.load()
         overlap = 0
         for chr, start, stop in self._iter_intersections(other_gr):
             overlap += 1
