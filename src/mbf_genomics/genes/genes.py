@@ -74,6 +74,7 @@ class Genes(GenomicRegions):
                 result_dir = result_dir or Path("results") / "Genes" / sheet_name / name
             else:
                 result_dir = result_dir or Path("results") / "Genes" / name
+            result_dir = Path(result_dir).absolute()
 
             self.column_properties = {
                 "chr": {

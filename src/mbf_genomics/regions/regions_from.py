@@ -4,9 +4,12 @@ import numpy as np
 import math
 
 from .regions import GenomicRegions
-from mbf_genomes.intervals import merge_intervals
+from mbf_nested_intervals import merge_df_intervals
 from mbf_externals.util import to_string
 from ..util import read_pandas
+
+
+#TODO: move more of the functionality into nested_intervals
 
 
 def verify_same_genome(list_of_grs):
@@ -339,9 +342,9 @@ def GenomicRegions_Common(
     """Combine serveral GRs into one. Keep only those (union) regions occuring in all."""
 
     def load():
-        union = merge_intervals(
+        union = merge_df_intervals(
             pd.concat([x.df[["chr", "start", "stop"]] for x in list_of_grs])
-        )
+        ).reset_index(drop=True)
         keep = np.ones((len(union),), dtype=np.bool)
         for gr in list_of_grs:
             for ii, row in union.iterrows():
@@ -354,15 +357,13 @@ def GenomicRegions_Common(
 
     verify_same_genome(list_of_grs)
     if ppg.inside_ppg():
-        deps = [x.build_intervals() for x in list_of_grs]
+        deps = []
         deps.append(
             ppg.ParameterInvariant(
                 name + "_input_grs", sorted([x.name for x in list_of_grs])
             )
         )
     else:
-        for x in list_of_grs:
-            x.build_intervals()
         deps = []
     vid = ("common", [x.vid for x in list_of_grs])
     return GenomicRegions(
@@ -455,7 +456,7 @@ def GenomicRegions_Difference(
             if not len(overlaps):  # the easy case...
                 new_rows.append(row)
             else:
-                overlaps = gr_a.merge_intervals(
+                overlaps = merge_df_intervals(
                     overlaps
                 )  # they are now also sorted, so all we need to do is walk them, keep the regions between them (and within the original interval)
                 start = row["start"]
@@ -484,13 +485,11 @@ def GenomicRegions_Difference(
         deps = [
             gr_b.load(),
             gr_a.load(),
-            gr_b.build_intervals(),
             ppg.ParameterInvariant(
                 "GenomicRegions_%s_parents" % new_name, (gr_a.name, gr_b.name)
             ),  # so if you swap out the gr, it's detected...
         ]
     else:
-        gr_b.build_intervals()
         deps = []
 
     result = GenomicRegions(
@@ -533,14 +532,12 @@ def GenomicRegions_Intersection(
         deps = [
             gr_b.load(),
             gr_a.load(),
-            gr_b.build_intervals(),
             ppg.ParameterInvariant(
                 "GenomicRegions_%s_parents" % new_name, (gr_a.name, gr_b.name)
             ),  # so if you swap out the gr, it's detected...
         ]
     else:
         deps = []
-        gr_b.build_intervals()
 
     result = GenomicRegions(
         new_name,
@@ -632,9 +629,9 @@ def GenomicRegions_CommonInAtLeastX(
     """Combine serveral GRs into one. Keep only those (union) regions occuring in at least x."""
 
     def load():
-        union = merge_intervals(
+        union = merge_df_intervals(
             pd.concat([x.df[["chr", "start", "stop"]] for x in list_of_grs])
-        )
+        ).reset_index()
         keep = np.zeros((len(union),), dtype=np.bool)
         for ii, row in union.iterrows():
             count = 0
@@ -644,12 +641,12 @@ def GenomicRegions_CommonInAtLeastX(
             keep[ii] = count >= X
         if not keep.any():
             raise ValueError("Filtered all of them")
-        return union[keep]
+        return union.iloc[keep]
 
     if len(set([x.genome for x in list_of_grs])) > 1:
         raise ValueError("Can only merge GenomicRegions that have the same genome")
     if ppg.inside_ppg():
-        deps = [x.build_intervals() for x in list_of_grs]
+        deps = []
         deps.append(
             ppg.ParameterInvariant(
                 name + "_input_grs", sorted([x.name for x in list_of_grs])
@@ -657,7 +654,6 @@ def GenomicRegions_CommonInAtLeastX(
         )
     else:
         deps = []
-        [x.build_intervals() for x in list_of_grs]
     vid = ("common at least %i" % X, [x.vid for x in list_of_grs])
     return GenomicRegions(
         name,
@@ -669,42 +665,6 @@ def GenomicRegions_CommonInAtLeastX(
         sheet_name=sheet_name,
         vid=vid,
     )
-
-
-def GenomicRegions_FromMotifHits(name, motif, threshold, genome):
-    def load():
-        chrs = []
-        starts = []
-        stops = []
-        scores = []
-        strands = []
-        for chr, length in genome.get_chromosome_lengths().items():
-            seq = genome.get_sequence(chr, 0, length)
-            hits = motif.scan(seq, threshold)
-            for dummy_idx, row in hits[0].iterrows():
-                chrs.append(chr)
-                start = min(row["start"], row["stop"])
-                stop = max(row["start"], row["stop"])
-                starts.append(start)
-                stops.append(stop)
-                strands.append("+" if row["start"] > row["stop"] else "-")
-                scores.append(row["score"])
-        return pd.DataFrame(
-            {"chr": chrs, "start": starts, "stop": stops, "scores": scores}
-        )
-
-    if ppg.inside_ppg():
-        deps = [
-            motif.load(),
-            ppg.ParameterInvariant("GR_%s" % name, (threshold,)),
-            genome.get_dependencies(),
-        ]
-    else:
-        deps = []
-    return GenomicRegions(
-        name, load, deps, genome, on_overlap="ignore", sheet_name="Motif"
-    )
-
 
 def GenomicRegions_Windows(
     genome,
@@ -765,15 +725,12 @@ def GenomicRegions_FilterRemoveOverlapping(
 
     if gr_a.load_strategy.build_deps:
         deps = [
-            [x.build_intervals() for x in other_grs],
             ppg.ParameterInvariant(
                 "GenomicRegions_%s_parents" % new_name,
                 (gr_a.name, [x.name for x in other_grs]),
             ),  # so if you swap out the gr, it's detected...
         ]
     else:
-        for other_gr in other_grs:
-            other_gr.build_intervals()
         deps = []
 
     return gr_a.filter(
@@ -804,15 +761,13 @@ def GenomicRegions_FilterToOverlapping(
         return keep
 
     if gr_a.load_strategy.build_deps:
-        deps = [other_gr.build_intervals() for other_gr in other_grs] + [
+        deps =[
             ppg.ParameterInvariant(
                 "GenomicRegions_%s_parents" % new_name,
                 (gr_a.name, [other_gr.name for other_gr in other_grs]),
             )  # so if you swap out the gr, it's detected...
         ]
     else:
-        for other_gr in other_grs:
-            other_gr.build_intervals()
         deps = []
 
     return gr_a.filter(

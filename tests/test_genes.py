@@ -1004,7 +1004,7 @@ class TestGenesPPG:
         gA = genes.Genes(
             genome, alternative_load_func=a, name="my_genes", result_dir="my_genes"
         )
-        assert gA.result_dir == Path("my_genes")
+        assert gA.result_dir.resolve() == Path("my_genes").resolve()
         gA.load()
         gA.load()
         with pytest.raises(ValueError):

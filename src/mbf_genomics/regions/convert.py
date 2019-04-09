@@ -83,8 +83,8 @@ def merge_connected():
     """
 
     def do_merge(df):
-        from mbf_genomes.intervals import merge_intervals
-        return merge_intervals(df, 1)
+        from mbf_nested_intervals import merge_df_intervals
+        return merge_df_intervals(df, lambda iv: iv.merge_connected())
 
     return do_merge
 

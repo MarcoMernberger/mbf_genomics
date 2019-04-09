@@ -2,22 +2,19 @@ import pypipegraph as ppg
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from collections import Iterator
+import itertools
+from collections.abc import Iterator
 
 
 from mbf_genomics.delayeddataframe import DelayedDataFrame
 from mbf_genomes import GenomeBase
 from mbf_externals.util import lazy_property
 from .annotators import SummitMiddle
-from mbf_genomes.intervals import merge_intervals, merge_intervals_with_callback
-
-
-def merge_identical(sub_df):
-    if (len(sub_df["start"].unique()) != 1) or (len(sub_df["stop"].unique()) != 1):
-        raise ValueError(
-            "Overlapping intervals: %s, merge_identical was set." % (sub_df,)
-        )
-    return sub_df.iloc[0].to_dict()
+from mbf_nested_intervals import (
+    merge_df_intervals,
+    merge_df_intervals_with_callback,
+    IntervalSet,
+)
 
 
 def get_overlapping_interval_indices(
@@ -40,6 +37,21 @@ def get_overlapping_interval_indices(
         if s < e:
             result.append(possible_match)
     return result
+
+
+def merge_identical_but_raise_on_further_overlap(df):
+    def iv_func(iv):
+        iv = iv.remove_duplicates()
+        if iv.any_overlapping():
+            raise ValueError(
+                "Overlapping after merging identical present. Use  a different on_overlap or fix our data"
+            )
+        return iv
+
+    res = merge_df_intervals(df, iv_func)
+    if res is None:
+        raise ValueError()
+    return res
 
 
 region_registry = {}
@@ -129,8 +141,6 @@ class GenomicRegions(DelayedDataFrame):
                 "Invalid on_overlap mode %s. Allowed: %s, or a tuple of ('merge', function)"
                 % (on_overlap, allowed_overlap_modes)
             )
-        if on_overlap == "merge_identical":
-            on_overlap = ("merge", merge_identical)
 
         self.name = name
         self.gr_loading_function = loading_function
@@ -142,13 +152,19 @@ class GenomicRegions(DelayedDataFrame):
         elif (
             self.on_overlap == "raise"
             or self.on_overlap == "merge"
+            or self.on_overlap == "merge_identical"
             or self.on_overlap == "drop"
-            or (isinstance(self.on_overlap, tuple) and self.on_overlap[0] == "merge")
+            or (
+                isinstance(self.on_overlap, tuple)
+                and self.on_overlap[0] == "merge"
+                and hasattr(self.on_overlap[1], "__call__")
+            )
         ):
             self.need_to_handle_overlapping_regions = False
         else:  # pragma: no cover - defensive
             raise ValueError(
-                "Don't know how to decide on has_overlapping from %s" % self.on_overlap
+                "Don't know how to decide on has_overlapping from %s"
+                % (self.on_overlap,)
             )
 
         if result_dir:
@@ -317,9 +333,16 @@ class GenomicRegions(DelayedDataFrame):
                 last_row = row
             return df
         elif self.on_overlap == "merge":
-            return self.merge_intervals(df)
-        elif isinstance(self.on_overlap, tuple) and self.on_overlap[0] == "merge":
-            return self.merge_intervals_with_callback(df, self.on_overlap[1])
+            return merge_df_intervals(df)
+        elif self.on_overlap == "merge_identical":
+            return merge_identical_but_raise_on_further_overlap(df)
+        elif (
+            isinstance(self.on_overlap, tuple)
+            and self.on_overlap[0] == "merge"
+            and hasattr(self.on_overlap[1], "__call__")
+        ):
+            return merge_df_intervals_with_callback(df, self.on_overlap[1])
+
         elif self.on_overlap == "ignore":
             df = df.sort_values(["chr", "start"], ascending=[True, True]).reset_index(
                 drop=True
@@ -345,102 +368,28 @@ class GenomicRegions(DelayedDataFrame):
             return df
 
         elif self.on_overlap == "drop":
-            return self.drop_intervals(df)
-        else: # pragma: no branch - defensive
-            raise NotImplementedError("This branch should not happen - unhandled on_overlap")
-
-    def merge_intervals(self, df):
-        return merge_intervals(df)
-
-    def merge_intervals_with_callback(self, df, callback):
-        """take a {chr, start, end, *} dataframe and merge overlapping intervals, calling callback for group larger than one.."""
-        return merge_intervals_with_callback(df, callback)
-
-    def drop_intervals(self, df):
-        """take a {chr, start, end, *} dataframe, and drop all intervals that overlap one or more others"""
-        df = df.sort_values(
-            ["chr", "start"], ascending=[True, True]
-        )  # you need to do this here so it's true later...
-        last_chr = None
-        last_stop = 0
-        last_row = None
-
-        chrs = np.array(df["chr"])
-        starts = np.array(df["start"])
-        stops = np.array(df["stop"])
-
-        ii = 0
-        lendf = len(df)
-        keep = np.ones((len(df),), dtype=np.bool)
-        while ii < lendf:
-            if chrs[ii] != last_chr:
-                last_chr = chrs[ii]
-                last_stop = 0
-            if starts[ii] < last_stop:
-                keep[ii] = False
-                keep[ii - 1] = False
-            else: # pragma: no cover
-                pass
-            if stops[ii] > last_stop:
-                last_stop = stops[ii]
-            last_row = ii
-            ii += 1
-        if last_row is not None:
-            keep[last_row] = True
-        return df.iloc[keep]
+            return merge_df_intervals(df, lambda iv: iv.merge_drop())
+        else:  # pragma: no branch - defensive
+            raise NotImplementedError(
+                "This branch should not happen - unhandled on_overlap"
+            )
 
     def do_build_intervals(self):
         """"Build the interval trees right now, ignoring all dependencies"""
-        # find out where the start and stop's of for each chromosome are
-        chr_diffs = {}
-        if len(self.df):  # no dataframes, no chromosome_intervals...
-            chrs_per_region = self.df["chr"]
-            shifted = np.roll(chrs_per_region, 1)
-            changed = chrs_per_region != shifted
-            if not changed.any():  # only a single chromosome...
-                chr_diffs[chrs_per_region[0]] = (0, len(self.df))
-
-            else:
-                breaks = list(np.where(changed)[0]) + [len(self.df)]
-                for ii in range(0, len(breaks) - 1):
-                    chr = chrs_per_region[breaks[ii]]
-                    start = breaks[ii]
-                    stop = breaks[ii + 1]
-                    chr_diffs[chr] = (start, stop)
-
-        self.chromosome_intervals = chr_diffs
+        if not hasattr(self, "_interval_sets"):
+            self._interval_sets = {}
+            for chr, tups in itertools.groupby(
+                self.df[["chr", "start", "stop"]].itertuples(), key=lambda tup: tup.chr
+            ):
+                tups = [(tup.start, tup.stop, tup[0]) for tup in tups]
+                self._interval_sets[chr] = IntervalSet.from_tuples_with_id(tups)
 
     def has_overlapping(self, chr, start, stop):
         """is there an interval overlapping the region passed"""
-        try:
-            chr_start, chr_stop = self.chromosome_intervals[chr]
-        except KeyError:
-            # print 'False1'
+        self.do_build_intervals()
+        if not chr in self._interval_sets:
             return False
-        # if chr_stop == chr_start: # no intrvals on this chromosome
-        # print 'False2'
-        # return None
-        start_array = self.df["start"][chr_start:chr_stop]
-        stop_array = self.df["stop"][chr_start:chr_stop]
-        first_start_smaller = np.searchsorted(start_array, start) - 1
-        first_end_larger = np.searchsorted(stop_array, stop, "right") + 1
-        # when was this necessary?
-        # if hasattr(first_start_smaller, "__iter__"):
-        # first_start_smaller = first_start_smaller[0]
-        # if hasattr(first_end_larger, "__iter__"):
-        # first_end_larger = first_end_larger[0]
-
-        for possible_match in range(
-            max(0, first_start_smaller), min(first_end_larger, len(stop_array))
-        ):
-            s = max(start, start_array.iloc[possible_match])
-            e = min(stop, stop_array.iloc[possible_match])
-            # print s, e
-            if s < e:
-                # print 'True'
-                return True
-        # print 'False3'
-        return False
+        return self._interval_sets[chr].has_overlap(start, stop)
 
     def get_overlapping(self, chr, start, stop):
         """Retrieve the rows for the region passed in.
@@ -450,75 +399,28 @@ class GenomicRegions(DelayedDataFrame):
         means an empty interval and nothing ever overlapping!
         """
         # print 'testing overlap for', chr, start, stop
-        try:
-            chr_start, chr_stop = self.chromosome_intervals[chr]
-        except KeyError:
+        self.do_build_intervals()
+        if not chr in self._interval_sets:
             return self.df[0:0]
-        # if chr_stop == chr_start: # no intervals on this chromosome
-        # return self.df[0:0]
-        start_array = np.array(self.df["start"][chr_start:chr_stop])
-        stop_array = np.array(self.df["stop"][chr_start:chr_stop])
-        selected_entries = get_overlapping_interval_indices(
-            start,
-            stop,
-            start_array,
-            stop_array,
-            self.need_to_handle_overlapping_regions,
-        )
-        return self.df.iloc[[x + chr_start for x in selected_entries]]
+        ids = sorted(self._interval_sets[chr].get_overlap(start, stop).to_ids())
+        return self.df.loc[ids]
 
-    def get_closest(self, chr, point):
-        """Find the interval that is closest to the passed point.
+    def get_closest_by_start(self, chr, point):
+        """Find the interval that has the  closest to the passed point.
         Returns a df with that interval, or an empty df!
         """
         # first we check whether we're on top of a region...
         # overlapping = self.get_overlapping(chr, point, point+1)
         # if len(overlapping):
         # return overlapping # could be more than one?!
-        try:
-            chr_start, chr_stop = self.chromosome_intervals[chr]
-        except KeyError:
-            return self.df[0:0]  # ie an empty df
-        #if chr_stop == chr_start:  # no intervals on this chromosome 
-        # - apperantly already covered by it not being in chrosome_intervals?
-            #return self.df[0:0]  # ie an empty df
-        start_array = np.array(self.df["start"][chr_start:chr_stop])
-        stop_array = np.array(self.df["stop"][chr_start:chr_stop])
-        if self.need_to_handle_overlapping_regions:
-            # TODO this could use some optimization with a more appropriate data structure
-            distance_to_start = np.abs(start_array - point)
-            distance_to_stop = np.abs(stop_array - point)
-            argmin_start = distance_to_start.argmin()
-            argmin_stop = distance_to_stop.argmin()
-            if distance_to_start[argmin_start] < distance_to_stop[argmin_stop]:
-                return self.df.iloc[
-                    chr_start + argmin_start : chr_start + argmin_start + 1
-                ]
-            else:
-                return self.df.iloc[
-                    chr_start + argmin_stop : chr_start + argmin_stop + 1
-                ]
-        else:
-
-            # now, we already know that there is no overlapping interval... so...
-            first_end_smaller = max(
-                0, min(len(stop_array) - 1, np.searchsorted(stop_array, point) - 1)
-            )
-            first_start_larger = max(
-                0,
-                min(len(stop_array) - 1, np.searchsorted(start_array, point, "right")),
-            )
-            distance_left = abs(point - stop_array[first_end_smaller])
-            distance_right = abs(start_array[first_start_larger] - point)
-            # print start_array, stop_array, first_end_smaller, first_start_larger, distance_left, distance_right
-            if distance_left < distance_right:
-                return self.df.iloc[
-                    chr_start + first_end_smaller : chr_start + first_end_smaller + 1
-                ]
-            else:
-                return self.df.iloc[
-                    chr_start + first_start_larger : chr_start + first_start_larger + 1
-                ]
+        self.do_build_intervals()
+        if not chr in self._interval_sets:
+            return self.df[0:0]
+        res = self._interval_sets[chr].find_closest_start(point)
+        if res is None:
+            return self.df[0:0]
+        start, stop, ids = res
+        return self.df.loc[ids]
 
     # various statistics
     def get_no_of_entries(self):
@@ -551,18 +453,6 @@ class GenomicRegions(DelayedDataFrame):
 
     def __repr__(self):
         return "GenomicRegion(%s)" % self.name
-
-    # interval querying
-    def build_intervals(self):
-        """Prepare the internal datastructure for all overlap/closest/set based operations"""
-        if self.load_strategy.build_deps:
-            return (
-                ppg.DataLoadingJob(self.name + "_build", self.do_build_intervals)
-                .depends_on(self.load())
-                .depends_on(self.genome.download_genome())
-            )
-        else:
-            self.do_build_intervals()
 
     # output functions
 
@@ -618,9 +508,12 @@ class GenomicRegions(DelayedDataFrame):
             deps = []
         return self.load_strategy.generate_file(output_filename, write, deps)
 
-    def write_bigbed(self, output_filename=None, name_column=None): # pragma: no cover - till we have the test
+    def write_bigbed(
+        self, output_filename=None, name_column=None
+    ):  # pragma: no cover - till we have the test
         """Store the intervals of the GenomicRegion in a big bed file"""
         from mbf_fileformats.bed import BedEntry, write_bigbed
+
         raise ValueError("track this")
 
         output_filename = self.pathify(output_filename, self.name + ".bigbed")
@@ -680,7 +573,7 @@ class GenomicRegions(DelayedDataFrame):
                 % (self.name, self.on_overlap)
             )
         if other_gr.need_to_handle_overlapping_regions:
-            other_df = self.merge_intervals(other_gr.df)
+            other_df = merge_df_intervals(other_gr.df)
         else:
             other_df = other_gr.df
         for chr in self.df["chr"].unique():

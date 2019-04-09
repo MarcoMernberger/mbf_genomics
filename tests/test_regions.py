@@ -15,7 +15,7 @@ import dppd_plotnine  # noqa:F401
 import mbf_genomics.regions as regions
 from mbf_genomics.annotator import Constant, Annotator
 
-from mbf_qualitycontrol.testing import assert_image_equal 
+from mbf_qualitycontrol.testing import assert_image_equal
 from .shared import (
     get_genome,
     get_genome_chr_length,
@@ -731,8 +731,8 @@ class TestGenomicRegionsLoading:
             return pd.DataFrame(
                 {
                     "chr": ["1", "1", "1", "3", "5"],
-                    "start": [10, 10, 1000, 10000, 100_000],
-                    "stop": [100, 100, 1110, 11110, 111_110],
+                    "start": [10, 10, 1000, 10, 100_000],
+                    "stop": [100, 100, 1110, 100, 111_110],
                 }
             )
 
@@ -1285,7 +1285,6 @@ class TestInterval:
 
     def test_overlapping(self):
         self.setUp()
-        force_load(self.a.build_intervals())
         run_pipegraph()
         found = self.a.get_overlapping("1", 800, 1001)
         assert len(found) == 1
@@ -1297,7 +1296,6 @@ class TestInterval:
             return pd.DataFrame({"chr": ["1"], "start": [100], "stop": [200]})
 
         a = regions.GenomicRegions("a", sample_data, [], self.genome)
-        force_load(a.build_intervals())
         run_pipegraph()
         print(dir(a))
         assert not len(a.get_overlapping("1", 5, 99))
@@ -1316,7 +1314,6 @@ class TestInterval:
             )
 
         a = regions.GenomicRegions("sha", sample_data, [], self.genome)
-        force_load(a.build_intervals())
         run_pipegraph()
         # emtpy query
         assert not a.has_overlapping("1", 7_778_885, 7_778_885)
@@ -1329,13 +1326,11 @@ class TestInterval:
 
     def test_has_overlapping(self):
         self.setUp()
-        force_load(self.a.build_intervals())
         run_pipegraph()
         assert self.a.has_overlapping("1", 800, 1001)
 
     def test_overlapping_point(self):
         self.setUp()
-        force_load(self.a.build_intervals())
         run_pipegraph()
         found = self.a.get_overlapping("2", 105, 106)
         assert len(found) == 1
@@ -1344,14 +1339,13 @@ class TestInterval:
 
     def test_has_overlapping_point(self):
         self.setUp()
-        force_load(self.a.build_intervals())
         run_pipegraph()
+        print(self.a._interval_sets)
         assert not self.a.has_overlapping("2", 105, 105)
         assert self.a.has_overlapping("2", 105, 106)
 
     def test_non_overlapping(self):
         self.setUp()
-        force_load(self.a.build_intervals())
         run_pipegraph()
         found = self.a.get_overlapping("1", 1200, 1300)
         assert len(found) == 0
@@ -1363,39 +1357,33 @@ class TestInterval:
 
     def test_has_overlapping_not(self):
         self.setUp()
-        force_load(self.a.build_intervals())
         run_pipegraph()
         assert not self.a.has_overlapping("1", 1200, 1300)
 
-    def test_build_intervals_works_with_empty_df(self):
         self.setUp()
 
         def sample_data():
             return pd.DataFrame({"chr": [], "start": [], "stop": []})
 
         b = regions.GenomicRegions("shub", sample_data, [], get_genome())
-        force_load(b.build_intervals())
         run_pipegraph()
         assert len(b.df) == 0
         assert not len(b.get_overlapping("1", 0, 10000))
         assert not b.has_overlapping("1", 0, 10000)
-        assert not len(b.get_closest("1", 500))
+        assert not len(b.get_closest_by_start("1", 500))
 
-    def test_build_intervals_works_with_missing_chrs(self):
         self.setUp()
 
         def sample_data():
             return pd.DataFrame({"chr": ["2"], "start": [100], "stop": [1000]})
 
         b = regions.GenomicRegions("shub", sample_data, [], get_genome_chr_length())
-        force_load(b.build_intervals())
         run_pipegraph()
         assert len(b.df) == 1
         assert not len(b.get_overlapping("1", 0, 10000))
         assert not b.has_overlapping("1", 0, 10000)
-        assert not len(b.get_closest("1", 500))
+        assert not len(b.get_closest_by_start("1", 500))
 
-    def test_build_intervals_works_with_empty_df_handle_overlapping(self):
         self.setUp()
 
         def sample_data():
@@ -1404,53 +1392,51 @@ class TestInterval:
         b = regions.GenomicRegions(
             "shub", sample_data, [], get_genome(), on_overlap="ignore"
         )
-        force_load(b.build_intervals())
         run_pipegraph()
         assert len(b.df) == 0
         assert not len(b.get_overlapping("1", 0, 10000))
         assert not b.has_overlapping("1", 0, 10000)
-        assert not len(b.get_closest("1", 500))
+        assert not len(b.get_closest_by_start("1", 500))
 
     def test_closest(self):
         self.setUp()
-        force_load(self.a.build_intervals())
         run_pipegraph()
-        found = self.a.get_closest("1", 5)
+        found = self.a.get_closest_by_start("1", 5)
         assert len(found) == 1
         assert found.iloc[0]["chr"] == "1"
         assert found.iloc[0]["start"] == 10
 
-        found = self.a.get_closest("2", 150)  # before, but not after...
+        found = self.a.get_closest_by_start("2", 150)  # before, but not after...
         assert len(found) == 1
         assert found.iloc[0]["chr"] == "2"
         assert found.iloc[0]["start"] == 100
 
         # that's still closer to the left one..
-        found = self.a.get_closest("1", 501)
+        found = self.a.get_closest_by_start("1", 501)
         assert len(found) == 1
         assert found.iloc[0]["chr"] == "1"
         assert found.iloc[0]["start"] == 10
 
         # definatly closer to the second one...
-        found = self.a.get_closest("1", 701)
+        found = self.a.get_closest_by_start("1", 701)
         assert len(found) == 1
         assert found.iloc[0]["chr"] == "1"
         assert found.iloc[0]["start"] == 1000
 
-        found = self.a.get_closest("1", 1050)  # within an interval...
+        found = self.a.get_closest_by_start("1", 1050)  # within an interval...
         assert len(found) == 1
         assert found.iloc[0]["chr"] == "1"
         assert found.iloc[0]["start"] == 1000
-        found = self.a.get_closest("1", 505)  # test the border
+        found = self.a.get_closest_by_start("1", 505)  # test the border
         assert len(found) == 1
         assert found.iloc[0]["chr"] == "1"
         assert found.iloc[0]["start"] == 10
-        found = self.a.get_closest("1", 506)  # test the border
+        found = self.a.get_closest_by_start("1", 506)  # test the border
         assert len(found) == 1
         assert found.iloc[0]["chr"] == "1"
         assert found.iloc[0]["start"] == 1000
 
-        found = self.a.get_closest("4", 701)  # empty chromosome...
+        found = self.a.get_closest_by_start("4", 701)  # empty chromosome...
         assert len(found) == 0
 
 
@@ -1471,7 +1457,6 @@ class TestIntervalTestsNeedingOverlapHandling(TestInterval):
 
         genome = get_genome_chr_length()
         a = regions.GenomicRegions("shu", sample_data, [], genome, on_overlap="ignore")
-        force_load(a.build_intervals())
         run_pipegraph()
         assert (a.get_overlapping("1", 25, 26).start == [25]).all()
         assert (a.get_overlapping("1", 15, 26).start == [10, 25]).all()
@@ -1525,28 +1510,27 @@ class TestIntervalTestsNeedingOverlapHandling(TestInterval):
         b = regions.GenomicRegions(
             "shbu", sample_data, [], get_genome(), on_overlap="ignore"
         )
-        force_load(b.build_intervals())
         run_pipegraph()
-        closest = b.get_closest("Chromosome", 1_015_327)
+        closest = b.get_closest_by_start("Chromosome", 1_015_327)
         assert len(closest)
         assert closest.iloc[0]["chr"] == "Chromosome"
         assert closest.iloc[0]["start"] == 1_051_311
-        closest = b.get_closest("Chromosome", 0)
+        closest = b.get_closest_by_start("Chromosome", 0)
         assert closest.iloc[0]["start"] == 566_564
-        closest = b.get_closest("Chromosome", 566_564)
+        closest = b.get_closest_by_start("Chromosome", 566_564)
         assert closest.iloc[0]["start"] == 566_564
-        closest = b.get_closest("Chromosome", 569_590)
+        closest = b.get_closest_by_start("Chromosome", 569_590)
         assert closest.iloc[0]["start"] == 569_592
-        closest = b.get_closest("Chromosome", 569_592)
+        closest = b.get_closest_by_start("Chromosome", 569_592)
         assert len(closest) == 1
         assert closest.iloc[0]["start"] == 569_592
-        closest = b.get_closest("Chromosome", 569_592 + 5)
+        closest = b.get_closest_by_start("Chromosome", 569_592 + 5)
         assert len(closest) == 1
         assert closest.iloc[0]["start"] == 569_592
         assert len(b.get_overlapping("Chromosome", 569_592, 569_593)) == 2
-        closest = b.get_closest("Chromosome", 667_063)
-        assert closest.iloc[0]["start"] == 566_564
-        closest = b.get_closest("Chromosome", 570_304)
+        closest = b.get_closest_by_start("Chromosome", 667_063)
+        assert closest.iloc[0]["start"] == 713_866
+        closest = b.get_closest_by_start("Chromosome", 570_304)
         assert closest.iloc[0]["start"] == 569_592
 
     def test_empty_chromosome(self):
@@ -1591,9 +1575,8 @@ class TestIntervalTestsNeedingOverlapHandling(TestInterval):
             )
 
         b = regions.GenomicRegions("shbu", sample_data, [], genome, on_overlap="ignore")
-        force_load(b.build_intervals())
         run_pipegraph()
-        closest = b.get_closest("2", 10)
+        closest = b.get_closest_by_start("2", 10)
         assert len(closest) == 0
 
 
@@ -1700,6 +1683,7 @@ class TestSetOperationsOnGenomicRegions:
             c = operation("c", a, b)
         c.write("shu.tsv")
         run_pipegraph()
+        print(c.df)
         assert len(should) == len(c.df)
         starts = []
         stops = []
@@ -1956,9 +1940,7 @@ class TestSetOperationsOnGenomicRegions:
         a = self.sample_to_gr(a, "a")
         b = self.sample_to_gr(b, "b")
         a.load()
-        force_load(a.build_intervals())
         b.load()
-        force_load(b.build_intervals())
         run_pipegraph()
         assert a.overlap_basepair(b) == 20
         assert b.overlap_basepair(a) == 20
@@ -1969,9 +1951,7 @@ class TestSetOperationsOnGenomicRegions:
         a = self.sample_to_gr(a, "a", on_overlap="ignore")
         b = self.sample_to_gr(b, "b")
         a.load()
-        force_load(a.build_intervals())
         b.load()
-        force_load(b.build_intervals())
         run_pipegraph()
         with pytest.raises(ValueError):
             a.overlap_basepair(b)
@@ -1982,9 +1962,7 @@ class TestSetOperationsOnGenomicRegions:
         a = self.sample_to_gr(a, "a")
         b = self.sample_to_gr(b, "b")
         a.load()
-        force_load(a.build_intervals())
         b.load()
-        force_load(b.build_intervals())
         run_pipegraph()
         assert a.overlap_basepair(b) == a.covered_bases
 
@@ -1994,9 +1972,7 @@ class TestSetOperationsOnGenomicRegions:
         a = self.sample_to_gr(a, "a")
         b = self.sample_to_gr(b, "b", on_overlap="ignore")
         a.load()
-        force_load(a.build_intervals())
         b.load()
-        force_load(b.build_intervals())
         run_pipegraph()
         assert a.overlap_basepair(b) == a.covered_bases
 
@@ -2006,9 +1982,7 @@ class TestSetOperationsOnGenomicRegions:
         a = self.sample_to_gr(a, "a")
         b = self.sample_to_gr(b, "b")
         a.load()
-        force_load(a.build_intervals())
         b.load()
-        force_load(b.build_intervals())
         run_pipegraph()
         assert a.overlap_percentage(b) == 20 / (40 + 100.0)
         assert b.overlap_percentage(a) == 20 / (40 + 100.0)
@@ -2019,9 +1993,7 @@ class TestSetOperationsOnGenomicRegions:
         a = self.sample_to_gr(a, "a")
         b = self.sample_to_gr(b, "b")
         a.load()
-        force_load(a.build_intervals())
         b.load()
-        force_load(b.build_intervals())
         run_pipegraph()
         assert a.overlap_percentage(b) == 0
         assert b.overlap_percentage(a) == 0
@@ -2032,9 +2004,7 @@ class TestSetOperationsOnGenomicRegions:
         a = self.sample_to_gr(a, "a")
         b = self.sample_to_gr(b, "b")
         a.load()
-        force_load(a.build_intervals())
         b.load()
-        force_load(b.build_intervals())
         run_pipegraph()
         assert a.intersection_count(b) == 1
         assert b.intersection_count(a) == 1
@@ -2047,8 +2017,6 @@ class TestSetOperationsOnGenomicRegions:
         b = self.sample_to_gr(b, "b")
         just_a = regions.GenomicRegions_FilterRemoveOverlapping("a-b", a, b)
         just_b = regions.GenomicRegions_FilterRemoveOverlapping("b-a", b, a)
-        force_load(a.build_intervals())
-        force_load(b.build_intervals())
         force_load(just_a.load())
         force_load(just_b.load())
         run_pipegraph()
@@ -2063,9 +2031,7 @@ class TestSetOperationsOnGenomicRegions:
         a = self.sample_to_gr(a, "a")
         b = self.sample_to_gr(b, "b")
         a.load()
-        force_load(a.build_intervals())
         b.load()
-        force_load(b.build_intervals())
         run_pipegraph()
         assert a.overlap_count(b) == 1
         assert b.overlap_count(a) == 1
@@ -2093,9 +2059,7 @@ class TestSetOperationsOnGenomicRegions:
             ),
         )
         a.load()
-        force_load(a.build_intervals())
         b.load()
-        force_load(b.build_intervals())
         run_pipegraph()
         with pytest.raises(ValueError):
             a.overlap_count(b)
@@ -2106,8 +2070,6 @@ class TestSetOperationsOnGenomicRegions:
         b = [(400, 510), (590, 650), (1050, 1055), (2000, 2002)]
         a = self.sample_to_gr(a, "a")
         b = self.sample_to_gr(b, "b")
-        force_load(a.build_intervals())
-        force_load(b.build_intervals())
         just_a = regions.GenomicRegions_FilterRemoveOverlapping("just_a", a, b)
         just_b = regions.GenomicRegions_FilterRemoveOverlapping("just_b", b, [a])
         force_load(just_a.load())
@@ -2130,8 +2092,6 @@ class TestSetOperationsOnGenomicRegions:
         b = [(400, 510), (590, 700), (10000, 10001)]
         a = self.sample_to_gr(a, "a")
         b = self.sample_to_gr(b, "b")
-        a.build_intervals()
-        b.build_intervals()
         m1 = regions.GenomicRegions_Overlapping("ab", a, b)
         m2 = regions.GenomicRegions_Overlapping("ba", b, a)
         force_load(m1.load())
@@ -2148,8 +2108,6 @@ class TestSetOperationsOnGenomicRegions:
         b = [(400, 510), (590, 700)]
         a = self.sample_to_gr(a, "a")
         b = self.sample_to_gr(b, "b")
-        a.build_intervals()
-        b.build_intervals()
         m1 = regions.GenomicRegions_Overlapping("ab", a, b)
         m2 = regions.GenomicRegions_Overlapping("ba", b, a)
 

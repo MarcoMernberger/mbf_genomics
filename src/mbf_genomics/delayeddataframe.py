@@ -501,8 +501,11 @@ class Load_PPG:
 
             self.ddf.df = pd.concat([self.ddf.df, df], axis=1)
 
+        (self.ddf.cache_dir / anno.__class__.__name__).mkdir(exist_ok=True)
         job = ppg.CachedDataLoadingJob(
-            self.ddf.cache_dir / anno.get_cache_name(), calc, load
+            self.ddf.cache_dir / anno.__class__.__name__ / anno.get_cache_name(),
+            calc,
+            load,
         )
         ppg.Job.depends_on(
             job, self.load()
