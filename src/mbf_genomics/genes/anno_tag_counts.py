@@ -9,7 +9,6 @@ import numpy as np
 import pypipegraph as ppg
 import hashlib
 import pandas as pd
-from mbf_genomes.intervals import merge_intervals
 from pathlib import Path
 
 
@@ -131,7 +130,7 @@ class CounterStrategyStrandedRust:
         if bam_index_name is None:
             bam_index_name = bam_filename + ".bai"
         else:
-            bam_index_name = bam_index_name.decode("utf-8")
+            bam_index_name = str(bam_index_name)
 
         intervals = interval_strategy._get_interval_tuples_by_chr(genome)
         gene_intervals = IntervalStrategyGene()._get_interval_tuples_by_chr(genome)
@@ -227,7 +226,7 @@ class CounterStrategyUnstrandedRust(_CounterStrategyBase):
         if bam_index_name is None:
             bam_index_name = bam_filename + ".bai"
         else:
-            bam_index_name = bam_index_name.decode("utf-8")
+            bam_index_name = str(bam_index_name)
 
         intervals = interval_strategy._get_interval_tuples_by_chr(genome)
         gene_intervals = IntervalStrategyGene()._get_interval_tuples_by_chr(genome)
@@ -313,27 +312,25 @@ class _IntervalStrategy:
         import bx.intervals
 
         by_chr = self._get_interval_tuples_by_chr(genome)
-        _bx_gene_intervals = {}
-        for chr, tups in by_chr.items():
-            tree_forward = bx.intervals.IntervalTree()
-            tree_reverse = bx.intervals.IntervalTree()
-            gene_to_no = {}
-            ii = 0
-            for tup in tups:  # stable_id, strand, [starts], [stops]
-                length = 0
-                for start, stop in zip(tup[2], tup[3]):
-                    if tup[1] == 1:
-                        tree_forward.insert_interval(
-                            bx.intervals.Interval(start, stop, ii)
-                        )
-                    else:
-                        tree_reverse.insert_interval(
-                            bx.intervals.Interval(start, stop, ii)
-                        )
-                    length += stop - start
-                gene_stable_id = tup[0]
-                gene_to_no[gene_stable_id] = ii
-                ii += 1
+        tree_forward = bx.intervals.IntervalTree()
+        tree_reverse = bx.intervals.IntervalTree()
+        gene_to_no = {}
+        ii = 0
+        for tup in by_chr[chr]:  # stable_id, strand, [starts], [stops]
+            length = 0
+            for start, stop in zip(tup[2], tup[3]):
+                if tup[1] == 1:
+                    tree_forward.insert_interval(
+                        bx.intervals.Interval(start, stop, ii)
+                    )
+                else:
+                    tree_reverse.insert_interval(
+                        bx.intervals.Interval(start, stop, ii)
+                    )
+                length += stop - start
+            gene_stable_id = tup[0]
+            gene_to_no[gene_stable_id] = ii
+            ii += 1
         return tree_forward, tree_reverse, gene_to_no
 
     def get_interval_lengths_by_gene(self, genome):
@@ -355,7 +352,6 @@ class _IntervalStrategy:
 class IntervalStrategyGene(_IntervalStrategy):
     """Count from TSS to TES"""
 
-    key = "_bx_gene_intervals"
 
     def _get_interval_tuples_by_chr(self, genome):
         result = {chr: [] for chr in genome.get_chromosome_lengths()}
@@ -368,7 +364,6 @@ class IntervalStrategyGene(_IntervalStrategy):
 class IntervalStrategyExon(_IntervalStrategy):
     """count all exons"""
 
-    key = "_bx_exon_intervals"
 
     def _get_interval_tuples_by_chr(self, genome):
         result = {chr: [] for chr in genome.get_chromosome_lengths()}
@@ -379,12 +374,23 @@ class IntervalStrategyExon(_IntervalStrategy):
             )
         return result
 
+class IntervalStrategyIntron(_IntervalStrategy):
+    """count all introns"""
+
+
+    def _get_interval_tuples_by_chr(self, genome):
+        result = {chr: [] for chr in genome.get_chromosome_lengths()}
+        for gene in genome.genes.values():
+            exons = gene.introns
+            result[gene.chr].append(
+                (gene.gene_stable_id, gene.strand, list(exons[0]), list(exons[1]))
+            )
+        return result
 
 class IntervalStrategyExonSmart(_IntervalStrategy):
     """For protein coding genes: count only in exons of protein-coding transcripts.
     For other genes: count all exons"""
 
-    key = "_bx_exon_smart_intervals_protein_coding"
 
     def _get_interval_tuples_by_chr(self, genome):
         result = {chr: [] for chr in genome.get_chromosome_lengths()}
@@ -395,6 +401,73 @@ class IntervalStrategyExonSmart(_IntervalStrategy):
             result[g.chr].append((g.gene_stable_id, g.strand, list(e[0]), list(e[1])))
         return result
 
+class IntervalStrategyExonIntronClassification(_IntervalStrategy):
+    """For QC purposes, defines all intron/exon intervals tagged
+    with nothing but intron/exon
+
+    See mbf_align.lanes.AlignedLane.register_qc_gene_strandedness
+    
+    """
+    def _get_interval_tuples_by_chr(self, genome):
+        from mbf_nested_intervals import IntervalSet
+        coll = {chr: [] for chr in genome.get_chromosome_lengths()}
+        ii = 0
+        for g in genome.genes.values():
+            exons = g.exons_overlapping
+            if len(exons[0]) == 0:
+                exons = g.exons_merged
+            for start, stop in zip(*exons):
+                coll[g.chr].append(
+                    (start, stop, 0b0101 if g.strand == 1 else 0b0110))
+            for start, stop in zip(*g.introns):
+                coll[g.chr].append(
+                    (start, stop, 0b1001 if g.strand == 1 else 0b1010))
+        result = {}
+        for chr, tups in coll.items():
+            iset = IntervalSet.from_tuples_with_id(tups)
+            #iset = iset.merge_split()
+            iset = iset.merge_hull()
+            if iset.any_overlapping():
+                raise NotImplementedError("Should not be reached")
+            result[chr] = []
+            for start, stop, ids in iset.to_tuples_with_id():
+                ids = set(ids)
+                if len(ids) == 1:
+                    id = list(ids)[0]
+                    if id == 0b0101:
+                        tag = 'exon'
+                        strand = +1
+                    elif id == 0b0110:
+                        tag = 'exon'
+                        strand = -1
+                    elif id == 0b1001:
+                        tag = 'intron'
+                        strand = +1
+                    elif id == 0b1010:
+                        tag = 'intron'
+                        strand = -1
+                    else: # pragma: no cover
+                        raise NotImplementedError("Should not be reached")
+                else:
+                    down = 0
+                    for i in ids:
+                        down |= i
+                    if down & 0b1100 == 0b1100:
+                        tag = 'both'
+                    elif down & 0b0100 == 0b0100:
+                        tag = 'exon'
+                    else:
+                        tag = 'intron'
+                    if down & 0b11 == 0b11:
+                        tag += '_undecidable'
+                        strand = 1 # doesn't matter, but must be one or the other
+                    elif down & 0b01:
+                        strand = 1
+                    else:
+                        strand -= 1
+                    
+                result[chr].append((tag, strand, [start], [stop]))
+        return result
 
 # Now the actual tag count annotators
 
@@ -476,7 +549,7 @@ class ExonSmartStrandedRust(_FastTagCounter):
         )
 
 
-class ExonSmartUnstranded(_FastTagCounter):
+class ExonSmartUnstrandedPython(_FastTagCounter):
     def __init__(self, aligned_lane):
         _FastTagCounter.__init__(
             self,
@@ -487,6 +560,16 @@ class ExonSmartUnstranded(_FastTagCounter):
             "Tag count inside exons of protein coding transcripts (all if no protein coding transcripts)  both strands",
         )
 
+class ExonSmartUnstrandedRust(_FastTagCounter):
+    def __init__(self, aligned_lane):
+        _FastTagCounter.__init__(
+            self,
+            aligned_lane,
+            CounterStrategyUnstrandedRust(),
+            IntervalStrategyExonSmart(),
+            "Exon, protein coding, unstranded smart tag count %s",
+            "Tag count inside exons of protein coding transcripts (all if no protein coding transcripts)  both strands",
+        )
 
 class ExonStrandedPython(_FastTagCounter):
     def __init__(self, aligned_lane):
@@ -589,6 +672,7 @@ GeneUnstranded = GeneUnstrandedRust
 GeneStranded = GeneStrandedRust
 ExonStranded = ExonStrandedRust
 ExonSmartStranded = ExonSmartStrandedRust
+ExonSmartUnstranded = ExonSmartUnstrandedRust
 
 # ## Normalizing annotators - convert raw tag counts into something normalized
 
@@ -616,8 +700,6 @@ class NormalizationCPM(Annotator):
     def calc(self, df):
         raw_counts = df[self.raw_anno.columns[0]]
         total = float(raw_counts.sum())
-        # print raw_counts[:100]
-        # print total, self.normalize_to
         result = raw_counts * (self.normalize_to / total)
         return pd.Series(result)
 
@@ -728,7 +810,6 @@ class NormalizationTPMBiotypes(Annotator):
         for biotype in self.biotypes:
             ok |= df["biotype"] == biotype
         raw_counts[~ok] = np.nan
-        print("raw", raw_counts)
 
         length_by_gene = self.raw_anno.interval_strategy.get_interval_lengths_by_gene(
             self.genome
