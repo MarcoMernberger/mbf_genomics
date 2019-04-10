@@ -514,43 +514,6 @@ class _FastTagCounter(Annotator):
             cf / self.cache_name, self, "_data", self.calc_data
         ).depends_on(self.aligned_lane.load())
 
-    def register_qc(self, gr):
-        self.register_qc_biotypes(gr)
-
-    def register_qc_biotypes(self, gr):
-        from mbf_qualitycontrol import register_qc, QCCallback
-
-        output_filename = (
-            self.aligned_lane.result_dir / f"reads_per_biotype_{gr.name}.png"
-        )
-
-        def build():
-            def plot(output_filename):
-                return (
-                    dp(gr.df)
-                    .groupby("biotype")
-                    .summarize((self.columns[0], lambda x: x.sum(), "read count"))
-                    .mutate(sample=self.aligned_lane.name)
-                    .p9()
-                    .theme_bw()
-                    .annotation_stripes()
-                    .add_bar("biotype", "read count", stat="identity")
-                    # .turn_x_axis_labels()
-                    .coord_flip()
-                    .title(self.aligned_lane.name)
-                    .render(
-                        output_filename,
-                        width=6,
-                        height=2 + len(gr.df.biotype.unique()) * 0.25,
-                    )
-                )
-
-            return ppg.FileGeneratingJob(output_filename, plot).depends_on(
-                gr.anno_jobs[self.cache_name]
-            )
-
-        register_qc(output_filename, QCCallback(build))
-
 
 # ## Raw tag count annos for analysis usage
 

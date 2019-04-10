@@ -72,7 +72,8 @@ class DelayedDataFrame(object):
         self += anno
         return self.anno_jobs[anno.get_cache_name()]
         """
-        self += anno
+        if not self.has_annotator(anno):
+            self += anno
         if self.load_strategy.build_deps:  # pragma: no branch
             return self.anno_jobs[anno.get_cache_name()]
 
