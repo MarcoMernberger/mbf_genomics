@@ -1,7 +1,7 @@
 import pytest
 import pypipegraph as ppg
 from pathlib import Path
-from mbf_genomes.testing import get_Candidatus_carsonella_ruddii_pv
+from mbf_sampledata import get_Candidatus_carsonella_ruddii_pv
 from mbf_genomes import InteractiveFileBasedGenome
 from mbf_genomes import HardCodedGenome
 from mbf_genomics.testing import RaisesDirectOrInsidePipegraph, MockGenome, run_pipegraph  # noqa: F401

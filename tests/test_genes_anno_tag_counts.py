@@ -13,7 +13,7 @@ def MockBam(chr, length, mode=1):
     chrs = [chr]
     fn = "mock.bam"
     bam = pysam.Samfile(
-        fn, "wb", reference_names=chrs, reference_lengths=[100000] * len(chrs)
+        fn, "wb", reference_names=chrs, reference_lengths=[100_000] * len(chrs)
     )
 
     def write_read(pos, strand, name, nh=1):
@@ -79,7 +79,7 @@ def MockBamFixed(reads):
     if Path(fn).exists():
         Path(fn).unlink()
     bam = pysam.Samfile(
-        fn, "wb", reference_names=chrs, reference_lengths=[100000] * len(chrs)
+        fn, "wb", reference_names=chrs, reference_lengths=[100_000] * len(chrs)
     )
     for read in reads:
         al = pysam.AlignedSegment()
@@ -112,7 +112,7 @@ def FakePaireEndBam(chr, length, reverse=False):
     chrs = [chr]
     fn = "mock.bam"
     bam = pysam.Samfile(
-        fn, "wb", reference_names=chrs, reference_lengths=[100000] * len(chrs)
+        fn, "wb", reference_names=chrs, reference_lengths=[100_000] * len(chrs)
     )
 
     def write_read(pos, strand, name):
@@ -2264,3 +2264,27 @@ class TestWeigthedCounts:
 
     def test_end_to_end(self):
         pass
+
+
+@pytest.mark.usefixtures("new_pipegraph")
+class TestQC:
+    def test_biotypes_plot(self):
+        from mbf_sampledata import get_human_22_fake_genome, get_sample_path
+        from mbf_align.lanes import AlignedSample
+        from mbf_genomics.genes.anno_tag_counts import GeneStranded
+        from mbf_qualitycontrol import do_qc
+        from mbf_qualitycontrol.testing import assert_image_equal
+
+        genome = get_human_22_fake_genome()
+        aligned = AlignedSample(
+            "rnaseq22", get_sample_path("mbf_align/rnaseq_spliced_chr22.bam"),
+            is_paired=False, vid=None, genome=genome
+        )
+        genes = Genes(genome)
+        tc = GeneStranded(aligned)
+        genes += tc
+        jobs = do_qc(lambda name: "reads_per_biotype_" in str(name))
+        assert len(jobs) == 1
+        run_pipegraph()
+        p = aligned.result_dir / f"reads_per_biotype_{genes.name}.png"
+        assert_image_equal(p)

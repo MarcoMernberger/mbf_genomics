@@ -61,6 +61,8 @@ class DelayedDataFrame(object):
         """Add and return self"""
         if isinstance(other, Annotator):
             self.load_strategy.add_annotator(other)
+            if hasattr(other, "register_qc"):
+                other.register_qc(self)
             return self
         else:
             return NotImplemented
