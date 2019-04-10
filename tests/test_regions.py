@@ -10,12 +10,13 @@ from pathlib import Path
 from pandas.testing import assert_frame_equal
 import dppd
 import dppd_plotnine  # noqa:F401
+from mbf_qualitycontrol.testing import assert_image_equal
+from mbf_sampledata import get_sample_data
 
 
 import mbf_genomics.regions as regions
 from mbf_genomics.annotator import Constant, Annotator
 
-from mbf_qualitycontrol.testing import assert_image_equal
 from .shared import (
     get_genome,
     get_genome_chr_length,
@@ -27,7 +28,6 @@ from .shared import (
 )
 
 dp, X = dppd.dppd()
-data_path = Path(__file__).parent / "sample_data"
 
 
 @pytest.mark.usefixtures("new_pipegraph")
@@ -2250,7 +2250,7 @@ class TestFromXYZ:
     def test_gff(self):
         a = regions.GenomicRegions_FromGFF(
             "shu",
-            data_path / "test.gff3",
+            get_sample_data("mbf_genomics/test.gff3"),
             get_genome_chr_length(),
             filter_function=lambda entry: entry["source"]
             == b"Regions_of_sig_enrichment",
@@ -2274,7 +2274,7 @@ class TestFromXYZ:
     def test_gff_with_name(self):
         a = regions.GenomicRegions_FromGFF(
             "shu",
-            data_path / "test_with_name.gff3",
+            get_sample_data("mbf_genomics/test_with_name.gff3"),
             get_genome_chr_length(),
             filter_function=lambda entry: entry["source"]
             == b"Regions_of_sig_enrichment",
@@ -2299,7 +2299,7 @@ class TestFromXYZ:
     def test_gff_below_zero(self):
         b = regions.GenomicRegions_FromGFF(
             "sha",
-            data_path / "test_below_zero.gff3",
+            get_sample_data("mbf_genomics/test_below_zero.gff3"),
             get_genome_chr_length(),
             filter_function=lambda entry: entry["source"]
             == b"Regions_of_sig_enrichment",
@@ -2310,7 +2310,7 @@ class TestFromXYZ:
         if ppg.inside_ppg():
             a = regions.GenomicRegions_FromGFF(
                 "shu",
-                data_path / "test_below_zero.gff3",
+                get_sample_data("mbf_genomics/test_below_zero.gff3"),
                 get_genome_chr_length(),
                 filter_function=lambda entry: entry["source"]
                 == b"Regions_of_sig_enrichment",
@@ -2328,7 +2328,7 @@ class TestFromXYZ:
             with pytest.raises(ValueError):
                 a = regions.GenomicRegions_FromGFF(
                     "shu",
-                    data_path / "test_below_zero.gff3",
+                    get_sample_data("mbf_genomics/test_below_zero.gff3"),
                     get_genome_chr_length(),
                     filter_function=lambda entry: entry["source"]
                     == b"Regions_of_sig_enrichment",
@@ -2340,7 +2340,7 @@ class TestFromXYZ:
     def test_gff_chromosome_mangler(self):
         a = regions.GenomicRegions_FromGFF(
             "shu",
-            data_path / "test.gff3",
+            get_sample_data("mbf_genomics/test.gff3"),
             get_genome_chr_length(),
             filter_function=lambda entry: entry["source"]
             == b"Regions_of_sig_enrichment",
@@ -2364,7 +2364,7 @@ class TestFromXYZ:
 
     def test_bed(self):
         a = regions.GenomicRegions_FromBed(
-            "shu", data_path / "test.bed", get_genome_chr_length()
+            "shu", get_sample_data("mbf_genomics/test.bed"), get_genome_chr_length()
         )
         force_load(a.load())
         run_pipegraph()
@@ -2390,7 +2390,7 @@ class TestFromXYZ:
 
     def test_bed_without_score(self):
         a = regions.GenomicRegions_FromBed(
-            "shu", data_path / "test_noscore.bed", get_genome_chr_length()
+            "shu", get_sample_data("mbf_genomics/test_noscore.bed"), get_genome_chr_length()
         )
         force_load(a.load())
         run_pipegraph()
@@ -2404,7 +2404,7 @@ class TestFromXYZ:
 
     def test_bed_constant_name(self):
         a = regions.GenomicRegions_FromBed(
-            "shu", data_path / "test_constant_name.bed", get_genome_chr_length()
+            "shu", get_sample_data("mbf_genomics/test_constant_name.bed"), get_genome_chr_length()
         )
         force_load(a.load())
         run_pipegraph()
@@ -2418,13 +2418,13 @@ class TestFromXYZ:
     def test_empty_bed(self):
         with RaisesDirectOrInsidePipegraph(ValueError):
             a = regions.GenomicRegions_FromBed(
-                "shu", data_path / "test_empty.bed", get_genome_chr_length()
+                "shu", get_sample_data("mbf_genomics/test_empty.bed"), get_genome_chr_length()
             )
             force_load(a.load())
 
     def test_bed_without_score(self):
         a = regions.GenomicRegions_FromBed(
-            "shu", data_path / "test_without_score.bed", get_genome_chr_length()
+            "shu", get_sample_data("mbf_genomics/test_without_score.bed"), get_genome_chr_length()
         )
         force_load(a.load())
         run_pipegraph()
@@ -2438,7 +2438,7 @@ class TestFromXYZ:
     def test_wig(self):
         a = regions.GenomicRegions_FromWig(
             "shu",
-            data_path / "test.wig",
+            get_sample_data("mbf_genomics/test.wig"),
             get_genome_chr_length(),
             enlarge_5prime=2,
             enlarge_3prime=1,
@@ -2465,7 +2465,7 @@ class TestFromXYZ:
 
     def test_partec(self):
         a = regions.GenomicRegions_FromPartec(
-            "shu", data_path / "test_partec.txt", get_genome_chr_length()
+            "shu", get_sample_data("mbf_genomics/test_partec.txt"), get_genome_chr_length()
         )
         force_load(a.load())
         run_pipegraph()
