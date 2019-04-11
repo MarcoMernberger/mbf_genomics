@@ -468,6 +468,26 @@ class IntervalStrategyExonIntronClassification(_IntervalStrategy):
         return result
 
 
+class IntervalStrategyWindows(_IntervalStrategy):
+    """For QC purposes, spawn all chromosomes with 
+    windows of the definied size
+
+    See mbf_align.lanes.AlignedLane.register_qc_subchromosomal
+    
+    """
+
+    def __init__(self, window_size):
+        self.window_size = window_size
+
+    def _get_interval_tuples_by_chr(self, genome):
+        result = {}
+        for chr, length in genome.get_chromosome_lengths().items():
+            result[chr] = []
+            for ii in range(0, length, self.window_size):
+                result[chr].append(("%s_%i" % (chr, ii), 0, [ii], [ii + self.window_size]))
+        return result
+
+
 # Now the actual tag count annotators
 
 
