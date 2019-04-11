@@ -909,7 +909,9 @@ class TestGenomicRegionsAnnotation:
         ca = Constant("Constant", 5)
         assert len(self.a.annotators) == 1
         anno_job = self.a.add_annotator(ca)
-        anno_job2 = self.a.add_annotator(Constant("Constant", 5))
+        cb = Constant("Constant", 5)
+        assert ca is cb
+        anno_job2 = self.a.add_annotator(cb)
         assert anno_job is anno_job2
 
     def test_has_annotator(self):

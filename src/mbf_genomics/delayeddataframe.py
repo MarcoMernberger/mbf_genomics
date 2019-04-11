@@ -74,6 +74,9 @@ class DelayedDataFrame(object):
         """
         if not self.has_annotator(anno):
             self += anno
+        else:
+            if self.get_annotator(anno.get_cache_name()) is not anno:
+                raise ValueError("trying to add different annotators with identical cache_names")
         if self.load_strategy.build_deps:  # pragma: no branch
             return self.anno_jobs[anno.get_cache_name()]
 
