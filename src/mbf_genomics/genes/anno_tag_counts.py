@@ -19,6 +19,7 @@ dp, X = dppd()
 
 
 class _CounterStrategyBase:
+    cores_needed = 1
     def count_reads(self, interval_strategy, genome, bamfile, reverse=False):
         lookup = {}
         for chr in genome.get_chromosome_lengths():
@@ -123,6 +124,7 @@ class CounterStrategyStranded(_CounterStrategyBase):
 
 
 class CounterStrategyStrandedRust:
+    cores_needed = -1
     def __init__(self):
         self.disable_sanity_check = False
 
@@ -222,6 +224,7 @@ class CounterStrategyUnstranded(_CounterStrategyBase):
 
 
 class CounterStrategyUnstrandedRust(_CounterStrategyBase):
+    cores_needed = -1
     def count_reads(self, interval_strategy, genome, bamfile, reverse=False):
         # bam_filename = bamfil
         bam_filename = bamfile.filename.decode("utf-8")
@@ -505,6 +508,7 @@ class _FastTagCounter(Annotator):
         self.cache_name = hashlib.md5(self.columns[0].encode("utf-8")).hexdigest()
         self.column_properties = {self.columns[0]: {"description": column_desc}}
         self.vid = aligned_lane.vid
+        self.cores_needed = count_strategy.cores_needed
 
     def calc(self, df):
         if ppg.inside_ppg():

@@ -2262,5 +2262,46 @@ class TestWeigthedCounts:
         assert lookup["FakeA"] == 0.5  #
         assert lookup["FakeB"] == 0.5 + 1
 
-    def test_end_to_end(self):
-        pass
+
+@pytest.mark.usefixtures("new_pipegraph")
+class TestPPG:
+    def test_cores_needed(self):
+        genes = pd.DataFrame(
+            [
+                {
+                    "gene_stable_id": "FakeA",
+                    "name": "A",
+                    "tss": 15,
+                    "tes": 300,
+                    "chr": "1",
+                },
+                {
+                    "gene_stable_id": "FakeB",
+                    "name": "B",
+                    "tss": 1200,
+                    "tes": 1000,
+                    "chr": "1",
+                },
+            ]
+        )
+        import pypipegraph as ppg
+
+        if not ppg.inside_ppg():
+            raise ValueError()
+        transcripts = pd.DataFrame({"name": [], "chr": [], "exons": [], "strand": []})
+        genome = MockGenome(genes, transcripts, {"1": 10000})
+        bam = MockBam("1", 100)
+        lane = MockLane("shu", bam)
+        g = Genes(genome)
+        annos = [
+            anno_tag_counts.ExonSmartStranded(lane),
+            anno_tag_counts.ExonSmartUnstranded(lane),
+        ]
+        for anno in annos:
+            g.add_annotator(anno)
+        #ppg.run_pipegraph()
+        g.load_strategy.fix_anno_tree()
+
+        for anno in annos:
+            j = g.anno_jobs[anno.get_cache_name()]
+            assert j.cores_needed == -1

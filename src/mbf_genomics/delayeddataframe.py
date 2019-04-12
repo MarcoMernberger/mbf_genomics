@@ -526,6 +526,8 @@ class Load_PPG:
         for d in anno.dep_annos():
             job.depends_on(self.ddf.anno_jobs[d.get_cache_name()])
         job.depends_on(anno.deps(self.ddf))
+        if hasattr(anno, 'cores_needed'):
+            job.cores_needed = anno.cores_needed
         return job
 
     def annotate(self):
