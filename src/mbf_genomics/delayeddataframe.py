@@ -61,8 +61,8 @@ class DelayedDataFrame(object):
         """Add and return self"""
         if isinstance(other, Annotator):
             self.load_strategy.add_annotator(other)
-            if hasattr(other, "register_qc"):
-                other.register_qc(self)
+            # if hasattr(other, "register_qc"):
+            #    other.register_qc(self)
             return self
         else:
             return NotImplemented
@@ -76,7 +76,9 @@ class DelayedDataFrame(object):
             self += anno
         else:
             if self.get_annotator(anno.get_cache_name()) is not anno:
-                raise ValueError("trying to add different annotators with identical cache_names")
+                raise ValueError(
+                    "trying to add different annotators with identical cache_names"
+                )
         if self.load_strategy.build_deps:  # pragma: no branch
             return self.anno_jobs[anno.get_cache_name()]
 
@@ -526,7 +528,7 @@ class Load_PPG:
         for d in anno.dep_annos():
             job.depends_on(self.ddf.anno_jobs[d.get_cache_name()])
         job.depends_on(anno.deps(self.ddf))
-        if hasattr(anno, 'cores_needed'):
+        if hasattr(anno, "cores_needed"):
             job.cores_needed = anno.cores_needed
         return job
 

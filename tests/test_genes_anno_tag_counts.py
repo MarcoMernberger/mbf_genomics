@@ -151,6 +151,16 @@ class MockLane(object):
     def get_bam(self):
         return self.bam
 
+    def get_bam_names (self):
+        bam_filename = self.bam.filename.decode("utf-8")
+        bam_index_name = self.bam.index_filename
+        if bam_index_name is None:
+            bam_index_name = bam_filename + ".bai"
+        else:
+            bam_index_name = str(bam_index_name)
+
+        return bam_filename, bam_index_name
+
     def load(self):
         pass
 
@@ -1605,7 +1615,8 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        lookup = count_strategy.count_reads(interval_strategy, genome, bam)
+        lookup = count_strategy.count_reads(interval_strategy, genome, bam.filename.decode('utf-8'),
+                                            bam.filename.decode('utf-8') + '.bai')
         assert lookup["FakeA"] == 1
         assert lookup["FakeB"] == 0
 
@@ -1635,7 +1646,8 @@ class TestWeigthedCounts:
         interval_strategy = IntervalStrategyGene()
 
         with pytest.raises(KeyError):
-            count_strategy.count_reads(interval_strategy, genome, bam)
+            count_strategy.count_reads(interval_strategy, genome, bam.filename.decode('utf-8'),
+                                       bam.filename.decode('utf-8') + '.bai')
 
         # self.assertEqual(lookup['FakeA'], 1)  # no tag -> count them both
         # self.assertEqual(lookup['FakeB'], 1)
@@ -1670,7 +1682,8 @@ class TestWeigthedCounts:
         interval_strategy = IntervalStrategyGene()
 
         with pytest.raises(ValueError):
-            count_strategy.count_reads(interval_strategy, genome, bam)
+            count_strategy.count_reads(interval_strategy, genome, bam.filename.decode('utf-8'),
+                                       bam.filename.decode('utf-8') + '.bai')
 
     def test_one_too_many_raises_nh_1(self):
 
@@ -1709,7 +1722,8 @@ class TestWeigthedCounts:
         interval_strategy = IntervalStrategyGene()
 
         def inner():
-            count_strategy.count_reads(interval_strategy, genome, bam)
+            count_strategy.count_reads(interval_strategy, genome, bam.filename.decode('utf-8'),
+                                       bam.filename.decode('utf-8') + '.bai')
 
         try:
             inner
@@ -1760,7 +1774,8 @@ class TestWeigthedCounts:
         interval_strategy = IntervalStrategyGene()
 
         def inner():
-            count_strategy.count_reads(interval_strategy, genome, bam)
+            count_strategy.count_reads(interval_strategy, genome, bam.filename.decode('utf-8'),
+                                       bam.filename.decode('utf-8') + '.bai')
 
         with pytest.raises(ValueError):
             inner()
@@ -1807,7 +1822,8 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        lookup = count_strategy.count_reads(interval_strategy, genome, bam)
+        lookup = count_strategy.count_reads(interval_strategy, genome, bam.filename.decode('utf-8'),
+                                            bam.filename.decode('utf-8') + '.bai')
         assert lookup["FakeA"] == 0.5  #
         assert lookup["FakeB"] == 0.5
 
@@ -1853,7 +1869,8 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        lookup = count_strategy.count_reads(interval_strategy, genome, bam)
+        lookup = count_strategy.count_reads(interval_strategy, genome, bam.filename.decode('utf-8'),
+                                            bam.filename.decode('utf-8') + '.bai')
         # how am I ever going to achieve this?
         assert lookup["FakeA"] == 1
         assert lookup["FakeB"] == 0
@@ -1899,7 +1916,8 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        lookup = count_strategy.count_reads(interval_strategy, genome, bam)
+        lookup = count_strategy.count_reads(interval_strategy, genome, bam.filename.decode('utf-8'),
+                                            bam.filename.decode('utf-8') + '.bai')
         assert lookup["FakeA"] == 1
         assert lookup["FakeB"] == 0
 
@@ -1950,7 +1968,8 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        lookup = count_strategy.count_reads(interval_strategy, genome, bam)
+        lookup = count_strategy.count_reads(interval_strategy, genome, bam.filename.decode('utf-8'),
+                                            bam.filename.decode('utf-8') + '.bai')
         assert lookup["FakeA"] == 0.5
         assert lookup["FakeB"] == 0.5
 
@@ -2007,7 +2026,8 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        lookup = count_strategy.count_reads(interval_strategy, genome, bam)
+        lookup = count_strategy.count_reads(interval_strategy, genome, bam.filename.decode('utf-8'),
+                                            bam.filename.decode('utf-8') + '.bai')
         assert lookup["FakeA"] == 1 / 3.0
         assert lookup["FakeB"] == 1 / 3.0
         assert lookup["FakeC"] == 1 / 3.0
@@ -2039,7 +2059,8 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        lookup = count_strategy.count_reads(interval_strategy, genome, bam)
+        lookup = count_strategy.count_reads(interval_strategy, genome, bam.filename.decode('utf-8'),
+                                            bam.filename.decode('utf-8') + '.bai')
         assert lookup["FakeA"] == 0.5
         assert lookup["FakeB"] == 0.5
 
@@ -2089,7 +2110,8 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        lookup = count_strategy.count_reads(interval_strategy, genome, bam)
+        lookup = count_strategy.count_reads(interval_strategy, genome, bam.filename.decode('utf-8'),
+                                            bam.filename.decode('utf-8') + '.bai')
         assert lookup["FakeA"] == 0.5
         assert lookup["FakeB"] == 0.5
 
@@ -2152,7 +2174,8 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        lookup = count_strategy.count_reads(interval_strategy, genome, bam)
+        lookup = count_strategy.count_reads(interval_strategy, genome, bam.filename.decode('utf-8'),
+                                            bam.filename.decode('utf-8') + '.bai')
         assert lookup["FakeA"] == 0.5  #
         assert lookup["FakeB"] == 0.5 + 1
 
@@ -2204,7 +2227,8 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        lookup = count_strategy.count_reads(interval_strategy, genome, bam)
+        lookup = count_strategy.count_reads(interval_strategy, genome, bam.filename.decode('utf-8'),
+                                            bam.filename.decode('utf-8') + '.bai')
         assert lookup["FakeA"] == 0.5  #
         assert lookup["FakeB"] == 0.5 + 1
 
@@ -2258,7 +2282,8 @@ class TestWeigthedCounts:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
         interval_strategy = IntervalStrategyGene()
-        lookup = count_strategy.count_reads(interval_strategy, genome, bam)
+        lookup = count_strategy.count_reads(interval_strategy, genome, bam.filename.decode('utf-8'),
+                                            bam.filename.decode('utf-8') + '.bai')
         assert lookup["FakeA"] == 0.5  #
         assert lookup["FakeB"] == 0.5 + 1
 

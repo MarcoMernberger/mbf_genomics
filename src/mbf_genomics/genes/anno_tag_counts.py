@@ -16,20 +16,8 @@ dp, X = dppd()
 
 
 # ## Base classes and strategies - skip these if you just care about using TagCount annotators
-
-
 class _CounterStrategyBase:
     cores_needed = 1
-    def count_reads(self, interval_strategy, genome, bamfile, reverse=False):
-        lookup = {}
-        for chr in genome.get_chromosome_lengths():
-            lookup.update(
-                self.count_gene_reads_on_chromosome(
-                    interval_strategy, genome, bamfile, chr, False
-                )
-            )
-        self.sanity_check(genome, lookup, bamfile, interval_strategy)
-        return lookup
 
     def extract_lookup(self, data):
         """Adapter for count strategies that have different outputs
@@ -38,104 +26,16 @@ class _CounterStrategyBase:
         return data
 
 
-class CounterStrategyStranded(_CounterStrategyBase):
-    """This counter fetches() all reads on one chromosome at once, then matches them to the respective intervals
-    defined by self.strategy.get_interval_trees"""
-
-    def __init__(self):
-        self.disable_sanity_check = False
-
-    def count_gene_reads_on_chromosome(
-        self, interval_strategy, genome, samfile, chr, reverse=False
-    ):
-        """Return a dict of gene_stable_id -> spliced exon matching read counts"""
-        # basic algorithm: for each aligned region, check whether it overlaps a (merged) exon
-        # if so, consider this read a hit for the gene with that exon
-        # reads may hit multiple genes (think overlapping genes, where each could have generated the read)
-        # multi aligned reads may count for multiple genes
-        # but not for the same gene multiple times
-        tree_forward, tree_reverse, gene_to_no = interval_strategy.get_interval_trees(
-            genome, chr
-        )
-
-        counts = {}
-        # one multi aligned read should only count once for a gene
-        # further alignments into the same gene don't count
-        # further alignments into other genes do though.
-        # because of that' we need to keep the read names in a set.
-        # uargh.
-        for read in samfile.fetch(chr, 0, genome.get_chromosome_lengths()[chr]):
-            seen = set()
-            if not reverse:
-                if read.is_reverse:
-                    tree = tree_reverse
-                else:
-                    tree = tree_forward
-            else:
-                if read.is_reverse:
-                    tree = tree_forward
-                else:
-                    tree = tree_reverse
-            for sub_start, sub_stop in read.get_blocks():
-                for x in tree.find(sub_start, sub_stop):
-                    seen.add(
-                        x.value
-                    )  # one read matches one gene once. It might match multiple genes though.
-            for ii in seen:
-                if ii not in counts:
-                    counts[ii] = set()
-                counts[ii].add(read.qname)
-                # counts[ii] += 1
-        real_counts = {}
-        no_to_gene = dict((v, k) for (k, v) in gene_to_no.items())
-        for ii in counts:
-            gene_stable_id = no_to_gene[ii]
-            real_counts[gene_stable_id] = len(counts[ii])
-        # if not real_counts and gene_to_no and len(chr) == 1:
-        # raise ValueError("Nothing counted %s" % chr)
-        return real_counts
-
-    def sanity_check(self, genome, lookup, bam_file, interval_strategy):
-        # the sanity check allows the exon tag count annotator to detect if you've reversed your reads
-        if self.disable_sanity_check:
-            return
-        longest_chr = list(
-            sorted([(v, k) for (k, v) in genome.get_chromosome_lengths().items()])
-        )[-1][1]
-        reverse_count = self.count_gene_reads_on_chromosome(
-            interval_strategy, genome, bam_file, longest_chr, reverse=True
-        )
-        error_count = 0
-        for gene_stable_id in reverse_count:
-            if reverse_count[gene_stable_id] > 100 and reverse_count[
-                gene_stable_id
-            ] > 1.1 * (lookup[gene_stable_id] if gene_stable_id in lookup else 0):
-                error_count += 1
-
-        if error_count > 0.1 * len(reverse_count):
-            # import cPickle
-            # with open('debug.pickle','wb') as op:
-            # cPickle.dump(lookup, op)
-            # cPickle.dump(reverse_count, op)
-            raise ValueError(
-                "Found at least %.2f%% of genes on longest chromosome to have a reverse read count (%s) was above 110%% of the exon read count. This indicates that this lane should have been reversed before alignment. Set reverse_reads=True on your Lane object"
-                % (100.0 * error_count / len(reverse_count), self.__class__.__name__)
-            )
-
-
-class CounterStrategyStrandedRust:
+class CounterStrategyStrandedRust(_CounterStrategyBase):
     cores_needed = -1
+
     def __init__(self):
         self.disable_sanity_check = False
 
-    def count_reads(self, interval_strategy, genome, bamfile, reverse=False):
+    def count_reads(
+        self, interval_strategy, genome, bam_filename, bam_index_name, reverse=False
+    ):
         # bam_filename = bamfil
-        bam_filename = bamfile.filename.decode("utf-8")
-        bam_index_name = bamfile.index_filename
-        if bam_index_name is None:
-            bam_index_name = bam_filename + ".bai"
-        else:
-            bam_index_name = str(bam_index_name)
 
         intervals = interval_strategy._get_interval_tuples_by_chr(genome)
         gene_intervals = IntervalStrategyGene()._get_interval_tuples_by_chr(genome)
@@ -172,67 +72,13 @@ class CounterStrategyStrandedRust:
         return data[0]
 
 
-class CounterStrategyUnstranded(_CounterStrategyBase):
-    """This counter fetches() all reads on one chromosome at once, 
-    then matches them to the respective intervals
-    defined by self.get_interval_trees"""
-
-    def count_gene_reads_on_chromosome(
-        self, interval_strategy, genome, samfile, chr, reverse=False
-    ):
-        """Return a dict of gene_stable_id -> spliced exon matching read counts"""
-        # basic algorithm: for each aligned region, check whether it overlaps a (merged) exon
-        # if so, consider this read a hit for the gene with that exon
-        # reads may hit multiple genes (think overlapping genes, where each could have generated the read)
-        # multi aligned reads may count for multiple genes
-        # but not for the same gene multiple times
-        tree_forward, tree_reverse, gene_to_no = interval_strategy.get_interval_trees(
-            genome, chr
-        )
-
-        counts = {}
-        # one multi aligned read should only count once for a gene
-        # further alignments into the same gene don't count
-        # further alignments into other genes do though.
-        # because of that' we need to keep the read names in a set.
-        # uargh.
-        for read in samfile.fetch(chr, 0, genome.get_chromosome_lengths()[chr]):
-            seen = set()
-            for sub_start, sub_stop in read.get_blocks():
-                for t in tree_forward, tree_reverse:
-                    for x in t.find(sub_start, sub_stop):
-                        seen.add(x.value)
-            for ii in seen:
-                if ii not in counts:
-                    counts[ii] = set()
-                counts[ii].add(read.qname)
-                # counts[ii] += 1
-        real_counts = {}
-        no_to_gene = dict((v, k) for (k, v) in gene_to_no.items())
-        for ii in counts:
-            gene_stable_id = no_to_gene[ii]
-            real_counts[gene_stable_id] = len(counts[ii])
-        # if not real_counts and gene_to_no and len(chr) == 1:
-        # print(counts)
-        # print(real_counts)
-        # print(not real_counts)
-        #            raise ValueError("Nothing counted %s" % chr)
-        return real_counts
-
-    def sanity_check(self, genome, lookup, bam_file, interval_strategy):
-        pass  # no op
-
-
 class CounterStrategyUnstrandedRust(_CounterStrategyBase):
     cores_needed = -1
-    def count_reads(self, interval_strategy, genome, bamfile, reverse=False):
+
+    def count_reads(
+        self, interval_strategy, genome, bam_filename, bam_index_name, reverse=False
+    ):
         # bam_filename = bamfil
-        bam_filename = bamfile.filename.decode("utf-8")
-        bam_index_name = bamfile.index_filename
-        if bam_index_name is None:
-            bam_index_name = bam_filename + ".bai"
-        else:
-            bam_index_name = str(bam_index_name)
 
         intervals = interval_strategy._get_interval_tuples_by_chr(genome)
         gene_intervals = IntervalStrategyGene()._get_interval_tuples_by_chr(genome)
@@ -249,7 +95,11 @@ class CounterStrategyWeightedStranded(_CounterStrategyBase):
     """Counts reads matching multiple genes as 1/hit_count
     for each gene"""
 
-    def count_reads(self, interval_strategy, genome, bamfile, reverse=False):
+    def count_reads(
+        self, interval_strategy, genome, bam_filename, bam_index_name, reverse=False
+    ):
+        import pysam
+        bamfile = pysam.Samfile(bam_filename, index_filename=bam_index_name)
         lookup = collections.defaultdict(int)
         read_storage = {}
         for chr, length in genome.get_chromosome_lengths().items():
@@ -487,7 +337,9 @@ class IntervalStrategyWindows(_IntervalStrategy):
         for chr, length in genome.get_chromosome_lengths().items():
             result[chr] = []
             for ii in range(0, length, self.window_size):
-                result[chr].append(("%s_%i" % (chr, ii), 0, [ii], [ii + self.window_size]))
+                result[chr].append(
+                    ("%s_%i" % (chr, ii), 0, [ii], [ii + self.window_size])
+                )
         return result
 
 
@@ -526,9 +378,9 @@ class _FastTagCounter(Annotator):
         return [self.load_data()]
 
     def calc_data(self):
-        bam_file = self.aligned_lane.get_bam()
+        bam_file, bam_index_name = self.aligned_lane.get_bam_names()
         return self.count_strategy.count_reads(
-            self.interval_strategy, self.genome, bam_file
+            self.interval_strategy, self.genome, bam_file, bam_index_name
         )
 
     def load_data(self):
@@ -542,18 +394,6 @@ class _FastTagCounter(Annotator):
 # ## Raw tag count annos for analysis usage
 
 
-class ExonSmartStrandedPython(_FastTagCounter):
-    def __init__(self, aligned_lane):
-        _FastTagCounter.__init__(
-            self,
-            aligned_lane,
-            CounterStrategyStranded(),
-            IntervalStrategyExonSmart(),
-            "Exon, protein coding, stranded smart tag count %s",
-            "Tag count inside exons of protein coding transcripts (all if no protein coding transcripts) exons, correct strand only",
-        )
-
-
 class ExonSmartStrandedRust(_FastTagCounter):
     def __init__(self, aligned_lane):
         _FastTagCounter.__init__(
@@ -563,18 +403,6 @@ class ExonSmartStrandedRust(_FastTagCounter):
             IntervalStrategyExonSmart(),
             "Exon, protein coding, stranded smart tag count %s",
             "Tag count inside exons of protein coding transcripts (all if no protein coding transcripts) exons, correct strand only",
-        )
-
-
-class ExonSmartUnstrandedPython(_FastTagCounter):
-    def __init__(self, aligned_lane):
-        _FastTagCounter.__init__(
-            self,
-            aligned_lane,
-            CounterStrategyUnstranded(),
-            IntervalStrategyExonSmart(),
-            "Exon, protein coding, unstranded smart tag count %s",
-            "Tag count inside exons of protein coding transcripts (all if no protein coding transcripts)  both strands",
         )
 
 
@@ -590,18 +418,6 @@ class ExonSmartUnstrandedRust(_FastTagCounter):
         )
 
 
-class ExonStrandedPython(_FastTagCounter):
-    def __init__(self, aligned_lane):
-        _FastTagCounter.__init__(
-            self,
-            aligned_lane,
-            CounterStrategyStranded(),
-            IntervalStrategyExon(),
-            "Exon, protein coding, stranded tag count %s",
-            "Tag count inside exons of protein coding transcripts (all if no protein coding transcripts) exons, correct strand only",
-        )
-
-
 class ExonStrandedRust(_FastTagCounter):
     def __init__(self, aligned_lane):
         _FastTagCounter.__init__(
@@ -614,12 +430,12 @@ class ExonStrandedRust(_FastTagCounter):
         )
 
 
-class ExonUnstranded(_FastTagCounter):
+class ExonUnstrandedRust(_FastTagCounter):
     def __init__(self, aligned_lane):
         _FastTagCounter.__init__(
             self,
             aligned_lane,
-            CounterStrategyUnstranded(),
+            CounterStrategyUnstrandedRust(),
             IntervalStrategyExon(),
             "Exon, protein coding, unstranded tag count %s",
             "Tag count inside exons of protein coding transcripts (all if no protein coding transcripts)  both strands",
@@ -638,18 +454,6 @@ class ExonSmartWeightedStranded(_FastTagCounter):
         )
 
 
-class GeneStrandedPython(_FastTagCounter):
-    def __init__(self, aligned_lane):
-        _FastTagCounter.__init__(
-            self,
-            aligned_lane,
-            CounterStrategyStranded(),
-            IntervalStrategyGene(),
-            "Gene, stranded tag count %s",
-            "Tag count inside gene body (tss..tes), correct strand only",
-        )
-
-
 class GeneStrandedRust(_FastTagCounter):
     def __init__(self, aligned_lane):
         _FastTagCounter.__init__(
@@ -659,18 +463,6 @@ class GeneStrandedRust(_FastTagCounter):
             IntervalStrategyGene(),
             "Gene, stranded tag count %s",
             "Tag count inside gene body (tss..tes), correct strand only",
-        )
-
-
-class GeneUnstrandedPython(_FastTagCounter):
-    def __init__(self, aligned_lane):
-        _FastTagCounter.__init__(
-            self,
-            aligned_lane,
-            CounterStrategyUnstranded(),
-            IntervalStrategyGene(),
-            "Gene unstranded tag count %s",
-            "Tag count inside gene body (tss..tes), both strands",
         )
 
 
@@ -690,6 +482,7 @@ class GeneUnstrandedRust(_FastTagCounter):
 GeneUnstranded = GeneUnstrandedRust
 GeneStranded = GeneStrandedRust
 ExonStranded = ExonStrandedRust
+ExonUnstranded = ExonUnstrandedRust
 ExonSmartStranded = ExonSmartStrandedRust
 ExonSmartUnstranded = ExonSmartUnstrandedRust
 
