@@ -11,6 +11,7 @@ import hashlib
 import pandas as pd
 from pathlib import Path
 from dppd import dppd
+from mbf_qualitycontrol import register_qc, QCCallback, get_qc
 
 dp, X = dppd()
 
@@ -28,6 +29,7 @@ class _CounterStrategyBase:
 
 class CounterStrategyStrandedRust(_CounterStrategyBase):
     cores_needed = -1
+    name = "stranded"
 
     def __init__(self):
         self.disable_sanity_check = False
@@ -40,9 +42,15 @@ class CounterStrategyStrandedRust(_CounterStrategyBase):
         intervals = interval_strategy._get_interval_tuples_by_chr(genome)
         gene_intervals = IntervalStrategyGene()._get_interval_tuples_by_chr(genome)
         from mbf_bam import count_reads_stranded
+        import pprint
+        with open('/project/test_intervals', 'w') as op:
+            op.write(pprint.pformat(intervals))
+        with open('/project/test_gene_intervals', 'w') as op:
+            op.write(pprint.pformat(gene_intervals))
 
         res = count_reads_stranded(
-            bam_filename, bam_index_name, intervals, gene_intervals
+            bam_filename, bam_index_name, 
+            intervals, gene_intervals,
         )
         self.sanity_check(res)
         return res
@@ -74,6 +82,7 @@ class CounterStrategyStrandedRust(_CounterStrategyBase):
 
 class CounterStrategyUnstrandedRust(_CounterStrategyBase):
     cores_needed = -1
+    name = "unstranded"
 
     def count_reads(
         self, interval_strategy, genome, bam_filename, bam_index_name, reverse=False
@@ -95,10 +104,13 @@ class CounterStrategyWeightedStranded(_CounterStrategyBase):
     """Counts reads matching multiple genes as 1/hit_count
     for each gene"""
 
+    name = "stranded+weighted"
+
     def count_reads(
         self, interval_strategy, genome, bam_filename, bam_index_name, reverse=False
     ):
         import pysam
+
         bamfile = pysam.Samfile(bam_filename, index_filename=bam_index_name)
         lookup = collections.defaultdict(int)
         read_storage = {}
@@ -204,6 +216,8 @@ class _IntervalStrategy:
 class IntervalStrategyGene(_IntervalStrategy):
     """Count from TSS to TES"""
 
+    name = "gene"
+
     def _get_interval_tuples_by_chr(self, genome):
         result = {chr: [] for chr in genome.get_chromosome_lengths()}
         gene_info = genome.df_genes
@@ -214,6 +228,8 @@ class IntervalStrategyGene(_IntervalStrategy):
 
 class IntervalStrategyExon(_IntervalStrategy):
     """count all exons"""
+
+    name = "exon"
 
     def _get_interval_tuples_by_chr(self, genome):
         result = {chr: [] for chr in genome.get_chromosome_lengths()}
@@ -228,6 +244,8 @@ class IntervalStrategyExon(_IntervalStrategy):
 class IntervalStrategyIntron(_IntervalStrategy):
     """count all introns"""
 
+    name = "intron"
+
     def _get_interval_tuples_by_chr(self, genome):
         result = {chr: [] for chr in genome.get_chromosome_lengths()}
         for gene in genome.genes.values():
@@ -241,6 +259,8 @@ class IntervalStrategyIntron(_IntervalStrategy):
 class IntervalStrategyExonSmart(_IntervalStrategy):
     """For protein coding genes: count only in exons of protein-coding transcripts.
     For other genes: count all exons"""
+
+    name = "exonsmart"
 
     def _get_interval_tuples_by_chr(self, genome):
         result = {chr: [] for chr in genome.get_chromosome_lengths()}
@@ -298,6 +318,55 @@ class _FastTagCounter(Annotator):
         return ppg.CachedAttributeLoadingJob(
             cf / self.cache_name, self, "_data", self.calc_data
         ).depends_on(self.aligned_lane.load())
+
+    def register_qc(self, genes):
+        self.register_qc_distribution(genes)
+
+    def register_qc_distribution(self, genes):
+        import plotnine as p9
+        output_filename = (
+            genes.result_dir / f"read_count_distribution_{self.count_strategy.name}"
+            f"_{self.interval_strategy.name}.png"
+        )
+        try:
+            q = get_qc(output_filename)
+        except KeyError:
+
+            class TagCountQCDistribution:
+                def __init__(self):
+                    self.annos = set()
+
+                def get_qc_job(self):
+                    def plot():
+                        df = genes.df
+                        return (
+                            dp(df)
+                            .select({x.aligned_lane.name: x.columns[0] for x in self.annos})
+                            .melt(var_name="sample", value_name="count")
+                            .p9()
+                            .theme_bw()
+                            .annotation_stripes()
+                            .geom_violin(p9.aes("sample", "count"), width=0.5)
+                            .add_boxplot(
+                                x="sample",
+                                y="count",
+                                _width=0.1,
+                                _fill=None,
+                                _color="blue",
+                            )
+                            .scale_y_continuous(trans='log10')
+                            .turn_x_axis_labels()
+                            .hide_x_axis_title()
+                            .render(output_filename)
+                        )
+
+                    return ppg.FileGeneratingJob(output_filename, plot).depends_on(
+                        [genes.add_annotator(x) for x in self.annos]
+                    )
+
+            q = TagCountQCDistribution()
+            register_qc(output_filename, q)
+        q.annos.add(self)
 
 
 # ## Raw tag count annos for analysis usage
@@ -397,11 +466,63 @@ ExonSmartUnstranded = ExonSmartUnstrandedRust
 
 # ## Normalizing annotators - convert raw tag counts into something normalized
 
+class NormalizationAnnotator(Annotator):
 
-class NormalizationCPM(Annotator):
+    def register_qc(self, genes):
+        self.register_qc_distribution(genes)
+
+    def register_qc_distribution(self, genes):
+        import plotnine as p9
+        output_filename = (
+            genes.result_dir / f"normalized_{self.name}_read_count_distribution_{self.raw_anno.count_strategy.name}"
+            f"_{self.raw_anno.interval_strategy.name}.png"
+        )
+        try:
+            q = get_qc(output_filename)
+        except KeyError:
+
+            class TagCountQCDistribution:
+                def __init__(self):
+                    self.annos = set()
+
+                def get_qc_job(self):
+                    def plot():
+                        df = genes.df
+                        return (
+                            dp(df)
+                            .select({x.aligned_lane.name: x.columns[0] for x in self.annos})
+                            .melt(var_name="sample", value_name='count')
+                            .p9()
+                            .theme_bw()
+                            .annotation_stripes()
+                            .geom_violin(p9.aes("sample", 'count'), width=0.5)
+                            .add_boxplot(
+                                x="sample",
+                                y='count',
+                                _width=0.1,
+                                _fill=None,
+                                _color="blue",
+                            )
+                            .scale_y_continuous(trans='log10', name=next(iter(self.annos)).name)
+                            .turn_x_axis_labels()
+                            .hide_x_axis_title()
+                            .render(output_filename)
+                        )
+
+                    return ppg.FileGeneratingJob(output_filename, plot).depends_on(
+                        [genes.add_annotator(x) for x in self.annos]
+                    )
+
+            q = TagCountQCDistribution()
+            register_qc(output_filename, q)
+        q.annos.add(self)
+
+
+class NormalizationCPM(NormalizationAnnotator):
     """Normalize to 1e6 by taking the sum of all genes"""
 
     def __init__(self, raw_anno):
+        self.name = 'CPM'
         self.genome = raw_anno.genome
         self.raw_anno = raw_anno
         self.vid = raw_anno.vid
@@ -425,13 +546,14 @@ class NormalizationCPM(Annotator):
         return pd.Series(result)
 
 
-class NormalizationTPM(Annotator):
+class NormalizationTPM(NormalizationAnnotator):
     """Normalize to transcripts per million, ie.
         count / length * (1e6 / (sum_i(count_/length_i)))
 
     """
 
     def __init__(self, raw_anno):
+        self.name = 'TPM'
         self.genome = raw_anno.genome
         self.raw_anno = raw_anno
         self.vid = raw_anno.vid
@@ -460,163 +582,8 @@ class NormalizationTPM(Annotator):
         return pd.DataFrame({self.columns[0]: result})
 
 
-class NormalizationCPMBiotypes(Annotator):
-    """Tormalize to 1e6 by taking the sum of all [biotype, biotype2] genes.
-    All other genes receive nan as their normalized value"""
-
-    def __init__(self, raw_anno, biotypes):
-        self.genome = raw_anno.genome
-        if not isinstance(biotypes, tuple):
-            raise ValueError("biotypes must be a tuple")
-        self.biotypes = biotypes
-        self.raw_anno = raw_anno
-        self.vid = raw_anno.vid
-        self.normalize_to = 1e6
-        self.aligned_lane = raw_anno.aligned_lane
-        self.columns = [
-            self.raw_anno.columns[0] + " CPM(%s)" % (", ".join(sorted(biotypes)))
-        ]
-        self.cache_name = hashlib.md5(self.columns[0].encode("utf-8")).hexdigest()
-        self.column_properties = {
-            self.columns[0]: {
-                "description": "Tag count inside protein coding (all if no protein coding transcripts) exons, normalized to 1e6 across genes in biotypes %s"
-                % (biotypes,)
-            }
-        }
-
-    def dep_annos(self):
-        return [self.raw_anno]
-
-    def calc(self, df):
-        raw_counts = df[self.raw_anno.columns[0]].copy()
-        ok = np.zeros(len(df), np.bool)
-        for biotype in self.biotypes:
-            ok |= df["biotype"] == biotype
-        raw_counts[~ok] = np.nan
-        total = float(raw_counts[ok].sum())
-        result = raw_counts * (self.normalize_to / total)
-        return pd.DataFrame({self.columns[0]: result})
-
-
-class NormalizationTPMBiotypes(Annotator):
-    """TPM, but only consider genes matching one of the biotypes
-    All other genes receive nan as their normalized value"""
-
-    def __init__(self, raw_anno, biotypes):
-        self.genome = raw_anno.genome
-        if not isinstance(biotypes, tuple):
-            raise ValueError("biotypes must be a tuple")
-        self.biotypes = biotypes
-        self.raw_anno = raw_anno
-        self.vid = raw_anno.vid
-        self.normalize_to = 1e6
-        self.aligned_lane = raw_anno.aligned_lane
-        self.columns = [
-            self.raw_anno.columns[0] + " tpm(%s)" % (", ".join(sorted(biotypes)))
-        ]
-        self.cache_name = hashlib.md5(self.columns[0].encode("utf-8")).hexdigest()
-        self.column_properties = {
-            self.columns[0]: {
-                "description": "transcripts per million, considering only biotypes %s"
-                % (biotypes,)
-            }
-        }
-
-    def dep_annos(self):
-        return [self.raw_anno]
-
-    def calc(self, df):
-        raw_counts = df[self.raw_anno.columns[0]].copy()
-        ok = np.zeros(len(df), np.bool)
-        for biotype in self.biotypes:
-            ok |= df["biotype"] == biotype
-        raw_counts[~ok] = np.nan
-
-        length_by_gene = self.raw_anno.interval_strategy.get_interval_lengths_by_gene(
-            self.genome
-        )
-        result = np.zeros(raw_counts.shape, float)
-        for ii, gene_stable_id in enumerate(df["gene_stable_id"]):
-            result[ii] = raw_counts[ii] / float(length_by_gene[gene_stable_id])
-        total = float(result[ok].sum())  # result.sum would be nan!
-        factor = self.normalize_to / total
-        result = result * factor
-        return pd.DataFrame({self.columns[0]: result})
-
-
 class NormalizationFPKM(Annotator):
     def __init__(self, raw_anno):
-        self.genome = raw_anno.genome
-        self.raw_anno = raw_anno
-        self.vid = raw_anno.vid
-        self.aligned_lane = raw_anno.aligned_lane
-        self.columns = [self.raw_anno.columns[0] + " FPKM"]
-        self.cache_name = hashlib.md5(self.columns[0].encode("utf-8")).hexdigest()
-        self.column_properties = {
-            self.columns[0]: {
-                "description": "Tag count inside protein coding (all if no protein coding transcripts) exons, normalized to FPKM"
-            }
-        }
-
-    def deps(self, genes):
-        return []
-
-    def dep_annos(self):
-        return [self.raw_anno]
-
-    def calc(self, df):
-        raw_counts = df[self.raw_anno.columns[0]]
-        # RPKM = (CDS read count * 10^9) / (CDS length * total mapped read
-        # count)
-        total = float(raw_counts.sum())
-        result = np.zeros(raw_counts.shape, float)
-        length_by_gene = self.raw_anno.interval_strategy.get_interval_lengths_by_gene(
-            self.genome
+        raise NotImplementedError(
+            "FPKM is a bad thing to use. It is not supported by mbf"
         )
-        for ii, gene_stable_id in enumerate(df["gene_stable_id"]):
-            result[ii] = raw_counts[ii] * 1e9 / (length_by_gene[gene_stable_id] * total)
-        return pd.DataFrame({self.columns[0]: result})
-
-
-class NormalizationFPKMBiotypes(Annotator):
-    def __init__(self, raw_anno, biotypes):
-        self.genome = raw_anno.genome
-        self.raw_anno = raw_anno
-        self.vid = raw_anno.vid
-        if not isinstance(biotypes, tuple):
-            raise ValueError("biotypes must be a tuple")
-        self.biotypes = biotypes
-        self.aligned_lane = raw_anno.aligned_lane
-        self.columns = [self.raw_anno.columns[0] + " FPKM"]
-        self.cache_name = hashlib.md5(self.columns[0].encode("utf-8")).hexdigest()
-        self.column_properties = {
-            self.columns[0]: {
-                "description": "Fragments per kilobase per million, considering only %s"
-                % (biotypes,)
-            }
-        }
-
-    def deps(self, genes):
-        return ppg.ParameterInvariant(
-            self.columns[0] + "_biotypes", list(self.biotypes)
-        )
-
-    def dep_annos(self):
-        return [self.raw_anno]
-
-    def calc(self, df):
-        raw_counts = df[self.raw_anno.columns[0]].copy()
-        # RPKM = (CDS read count * 10^9) / (CDS length * total mapped read
-        # count)
-        ok = np.zeros(len(df), np.bool)
-        for biotype in self.biotypes:
-            ok |= df["biotype"] == biotype
-        raw_counts[~ok] = np.nan
-        total = float(raw_counts.sum())
-        result = np.zeros(raw_counts.shape, float)
-        length_by_gene = self.raw_anno.interval_strategy.get_interval_lengths_by_gene(
-            self.genome
-        )
-        for ii, gene_stable_id in enumerate(df["gene_stable_id"]):
-            result[ii] = raw_counts[ii] * 1e9 / (length_by_gene[gene_stable_id] * total)
-        return pd.DataFrame({self.columns[0]: result})

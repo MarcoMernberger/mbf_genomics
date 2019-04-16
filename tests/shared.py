@@ -4,7 +4,12 @@ from pathlib import Path
 from mbf_sampledata import get_Candidatus_carsonella_ruddii_pv
 from mbf_genomes import InteractiveFileBasedGenome
 from mbf_genomes import HardCodedGenome
-from mbf_genomics.testing import RaisesDirectOrInsidePipegraph, MockGenome, run_pipegraph  # noqa: F401
+from mbf_genomics.testing import (
+    RaisesDirectOrInsidePipegraph,
+    MockGenome,
+    run_pipegraph,
+    force_load,
+)  # noqa: F401
 
 ppg_genome = None
 
@@ -50,17 +55,3 @@ def get_genome_chr_length(chr_lengths=None, name=None):
 
 def inside_ppg():
     return ppg.util.inside_ppg()
-
-
-def force_load(job, prefix=None):
-    """make sure a dataloadingjob has been loaded (if applicable)"""
-    if inside_ppg():
-        if prefix is None:
-            if not isinstance(job, ppg.Job):
-                job = job()
-            prefix = job.job_id
-        return ppg.JobGeneratingJob(prefix + "_force_load", lambda: None).depends_on(
-            job
-        )
-
-

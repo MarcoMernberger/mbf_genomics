@@ -1,4 +1,5 @@
 import pandas as pd
+from frozendict import frozendict
 
 
 def read_pandas(filename):
@@ -18,3 +19,27 @@ def read_pandas(filename):
         return pd.read_csv(filename)
     else:
         raise ValueError("Unknown filetype: %s" % filename)
+
+def freeze(obj):
+    ''' Turn dicts into frozendict,
+        lists into tuples, and sets
+        into frozensets, recursively - usefull
+        to get a hash value..
+    '''
+
+    try:
+        hash(obj)
+        return obj
+    except TypeError:
+        pass
+
+    if isinstance(obj, dict):
+        frz = {k: freeze(obj[k]) for k in obj}
+        return frozendict(frz)
+    elif isinstance(obj, list):
+        return tuple(obj)
+    elif isinstance(obj, set):
+        return frozenset(obj)
+    else:
+        msg = 'Unsupported type: %r' % type(obj).__name__
+        raise TypeError(msg)

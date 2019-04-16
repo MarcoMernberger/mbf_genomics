@@ -4,7 +4,10 @@ import numpy as np
 import pandas as pd
 from mbf_genomics.genes.anno_tag_counts import IntervalStrategyGene
 from mbf_genomics.genes import Genes, anno_tag_counts
+from mbf_qualitycontrol import do_qc, no_qc
+from mbf_qualitycontrol.testing import assert_image_equal
 from .shared import MockGenome, force_load, run_pipegraph, RaisesDirectOrInsidePipegraph
+from .old_reference_code import NormalizationCPMBiotypes, NormalizationTPMBiotypes
 import pysam
 
 
@@ -1010,13 +1013,19 @@ class TestCPMBiotypes:
         lane = MockLane(bam, genome)
         anno = anno_tag_counts.ExonSmartStranded(lane)
         anno.count_strategy.disable_sanity_check = True
-        anno2 = anno_tag_counts.NormalizationCPMBiotypes(anno, ("protein_coding",))
+        anno2 = NormalizationCPMBiotypes(anno, ("protein_coding",))
         force_load(gr.add_annotator(anno2))
+        gr_biotype = gr.filter("pc", lambda df: df["biotype"] == "protein_coding")
+        anno3 = anno_tag_counts.NormalizationCPM(anno)
+        force_load(gr_biotype.add_annotator(anno3))
         run_pipegraph()
         df = gr.df.sort_values("gene_stable_id")
 
         assert df[anno2.columns[0]][0] == 1e6
         assert np.isnan(df[anno2.columns[0]][1])
+
+        assert gr_biotype.df[anno3.columns[0]][0] == 1e6
+        assert len(gr_biotype.df) == 1
 
     def test_stranded2(self):
 
@@ -1084,51 +1093,23 @@ class TestCPMBiotypes:
         lane = MockLane(bam, genome)
         anno = anno_tag_counts.ExonSmartStranded(lane)
         anno.count_strategy.disable_sanity_check = True
-        anno2 = anno_tag_counts.NormalizationCPMBiotypes(
-            anno, ("protein_coding", "misc_RNA")
-        )
+        anno2 = NormalizationCPMBiotypes(anno, ("protein_coding", "misc_RNA"))
         force_load(gr.add_annotator(anno2))
+        gr_biotype = gr.filter(
+            "pc", lambda df: df["biotype"].isin(["protein_coding", "misc_RNA"])
+        )
+        anno3 = anno_tag_counts.NormalizationCPM(anno)
+        force_load(gr_biotype.add_annotator(anno3))
+        force_load(gr_biotype.add_annotator(anno2))
         run_pipegraph()
         df = gr.df.sort_values("gene_stable_id")
 
         assert (
             df[anno2.columns[0]] == np.array([400 * 1e6 / 650, 250 * 1e6 / 650])
         ).all()
-
-    def test_validation(self):
-        bam = MockBam("1", 10000, mode=4)
-        genes = pd.DataFrame(
-            [
-                {
-                    "gene_stable_id": "FakeA",
-                    "name": "A",
-                    "tss": 0,
-                    "tes": 2000,
-                    "chr": "1",
-                    "biotype": "protein_coding",
-                    "strand": 1,
-                }
-            ]
-        )
-        transcripts = pd.DataFrame(
-            [
-                {
-                    "name": "Fakea1",
-                    "chr": "1",
-                    "exons": [(500, 600)],
-                    "strand": 1,
-                    "gene_stable_id": "FakeA",
-                    "biotype": "misc_RNA",
-                }
-            ]
-        )
-        genome = MockGenome(genes, transcripts, {"1": 10000})
-        gr = Genes(genome)
-        lane = MockLane(bam, genome)
-        anno = anno_tag_counts.ExonSmartStranded(lane)
-        anno.count_strategy.disable_sanity_check = True
-        with pytest.raises(ValueError):
-            anno_tag_counts.NormalizationCPMBiotypes(anno, "protein_coding")
+        assert (
+            gr_biotype.df[anno3.columns[0]] == gr_biotype.df[anno2.columns[0]]
+        ).all()
 
 
 @pytest.mark.usefixtures("both_ppg_and_no_ppg")
@@ -1199,9 +1180,12 @@ class TestTPMBiotypes:
         lane = MockLane(bam, genome)
         anno = anno_tag_counts.ExonSmartStranded(lane)
         anno.count_strategy.disable_sanity_check = True
-        anno2 = anno_tag_counts.NormalizationTPMBiotypes(anno, ("protein_coding",))
-
+        anno2 = NormalizationTPMBiotypes(anno, ("protein_coding",))
         force_load(gr.add_annotator(anno2))
+        gr_biotype = gr.filter("pc", lambda df: df["biotype"].isin(["protein_coding"]))
+        anno3 = anno_tag_counts.NormalizationTPM(anno)
+        force_load(gr_biotype.add_annotator(anno3))
+        force_load(gr_biotype.add_annotator(anno2))
         run_pipegraph()
         df = gr.df.sort_values("gene_stable_id")
         # length_by_gene = anno.interval_strategy.get_interval_lengths_by_gene(genome)
@@ -1211,6 +1195,9 @@ class TestTPMBiotypes:
         # tpms = xi * (1e6 / xi.sum())
         assert df[anno2.columns[0]][0] == 1e6
         assert np.isnan(df[anno2.columns[0]][1])
+        assert (
+            gr_biotype.df[anno3.columns[0]][0] == gr_biotype.df[anno2.columns[0]][0]
+        ).all()
 
     def test_stranded2(self):
 
@@ -1278,10 +1265,14 @@ class TestTPMBiotypes:
         lane = MockLane(bam, genome)
         anno = anno_tag_counts.ExonSmartStranded(lane)
         anno.count_strategy.disable_sanity_check = True
-        anno2 = anno_tag_counts.NormalizationTPMBiotypes(
-            anno, ("protein_coding", "misc_RNA")
-        )
+        anno2 = NormalizationTPMBiotypes(anno, ("protein_coding", "misc_RNA"))
         force_load(gr.add_annotator(anno2))
+        gr_biotype = gr.filter(
+            "pc", lambda df: df["biotype"].isin(["protein_coding", "misc_RNA"])
+        )
+        anno3 = anno_tag_counts.NormalizationTPM(anno)
+        force_load(gr_biotype.add_annotator(anno3))
+        force_load(gr_biotype.add_annotator(anno2))
         run_pipegraph()
         df = gr.df.sort_values("gene_stable_id")
 
@@ -1292,279 +1283,15 @@ class TestTPMBiotypes:
             df[anno2.columns[0]]
             == np.array([400 / 100.0 * tpm_factor, 250 / 250.0 * tpm_factor])
         ).all()
-
-    def test_validation(self):
-        bam = MockBam("1", 10000, mode=4)
-        genes = pd.DataFrame(
-            [
-                {
-                    "gene_stable_id": "FakeA",
-                    "name": "A",
-                    "tss": 0,
-                    "tes": 2000,
-                    "chr": "1",
-                    "biotype": "protein_coding",
-                    "strand": 1,
-                }
-            ]
-        )
-        transcripts = pd.DataFrame(
-            [
-                {
-                    "name": "Fakea1",
-                    "chr": "1",
-                    "exons": [(500, 600)],
-                    "strand": 1,
-                    "gene_stable_id": "FakeA",
-                    "biotype": "misc_RNA",
-                }
-            ]
-        )
-        genome = MockGenome(genes, transcripts, {"1": 10000})
-        gr = Genes(genome)
-        lane = MockLane(bam, genome)
-        anno = anno_tag_counts.ExonSmartStranded(lane)
-        anno.count_strategy.disable_sanity_check = True
-        with pytest.raises(ValueError):
-            anno_tag_counts.NormalizationTPMBiotypes(anno, "protein_coding")
+        assert (
+            gr_biotype.df[anno3.columns[0]][0] == gr_biotype.df[anno2.columns[0]][0]
+        ).all()
 
 
-@pytest.mark.usefixtures("both_ppg_and_no_ppg")
 class TestFPKM:
-    def test_stranded_exon(self):
-
-        bam = MockBam("1", 10000, mode=4)
-        genes = pd.DataFrame(
-            [
-                {
-                    "gene_stable_id": "FakeA",
-                    "name": "A",
-                    "tss": 0,
-                    "tes": 2000,
-                    "chr": "1",
-                    "strand": 1,
-                },
-                {
-                    "gene_stable_id": "FakeB",
-                    "name": "B",
-                    "tss": 4000,
-                    "tes": 2000,
-                    "chr": "1",
-                    "strand": -1,
-                },
-            ]
-        )
-        transcripts = pd.DataFrame(
-            [
-                {
-                    "name": "Fakea1",
-                    "chr": "1",
-                    "exons": [(500, 600)],
-                    "strand": 1,
-                    "gene_stable_id": "FakeA",
-                    "biotype": "misc_RNA",
-                },
-                {
-                    "name": "Fakeb1",
-                    "chr": "1",
-                    "exons": [(3900, 4000), (2900, 3000)],
-                    "strand": -1,
-                    "gene_stable_id": "FakeB",
-                    "biotype": "protein_coding",
-                },
-                {
-                    "name": "Fakeb2",
-                    "chr": "1",
-                    "exons": [(3900, 4000), (2000, 3000)],
-                    "strand": -1,
-                    "gene_stable_id": "FakeB",
-                    "biotype": "misc_RNA",
-                },
-                {
-                    "name": "Fakeb3",
-                    "chr": "1",
-                    "exons": [(3900, 4000), (2850, 3000)],
-                    "strand": -1,
-                    "gene_stable_id": "FakeB",
-                    "biotype": "protein_coding",
-                },
-            ]
-        )
-        genome = MockGenome(genes, transcripts, {"1": 10000})
-        gr = Genes(genome)
-        lane = MockLane(bam, genome)
-        anno = anno_tag_counts.ExonSmartStranded(lane)
-        anno.count_strategy.disable_sanity_check = True
-        anno2 = anno_tag_counts.NormalizationFPKM(anno)
-        force_load(gr.add_annotator(anno2))
-        run_pipegraph()
-        df = gr.df.sort_values("gene_stable_id")
-        assert (
-            np.abs(
-                df[anno2.columns[0]]
-                - np.array([400 * 1e6 / 650.0 / 0.1, 250 * 1e6 / 650 / 0.25])
-            )
-            < 0.00001
-        ).all()
-
-    def test_stranded_gene(self):
-
-        bam = MockBam("1", 10000, mode=4)  # 4 forward, one reverse...
-        genes = pd.DataFrame(
-            [
-                {
-                    "gene_stable_id": "FakeA",
-                    "name": "A",
-                    "tss": 1000,
-                    "tes": 2000,
-                    "chr": "1",
-                    "strand": 1,
-                },
-                {
-                    "gene_stable_id": "FakeB",
-                    "name": "B",
-                    "tss": 4000,
-                    "tes": 2000,
-                    "chr": "1",
-                    "strand": -1,
-                },
-            ]
-        )
-        transcripts = pd.DataFrame(
-            [
-                {
-                    "name": "Fakea1",
-                    "chr": "1",
-                    "exons": [(1500, 1600)],
-                    "strand": 1,
-                    "gene_stable_id": "FakeA",
-                    "biotype": "misc_RNA",
-                },
-                {
-                    "name": "Fakeb1",
-                    "chr": "1",
-                    "exons": [(3900, 4000), (2900, 3000)],
-                    "strand": -1,
-                    "gene_stable_id": "FakeB",
-                    "biotype": "protein_coding",
-                },
-                {
-                    "name": "Fakeb2",
-                    "chr": "1",
-                    "exons": [(3900, 4000), (2000, 3000)],
-                    "strand": -1,
-                    "gene_stable_id": "FakeB",
-                    "biotype": "misc_RNA",
-                },
-                {
-                    "name": "Fakeb3",
-                    "chr": "1",
-                    "exons": [(3900, 4000), (2850, 3000)],
-                    "strand": -1,
-                    "gene_stable_id": "FakeB",
-                    "biotype": "protein_coding",
-                },
-            ]
-        )
-        genome = MockGenome(genes, transcripts, {"1": 10000})
-        gr = Genes(genome)
-        lane = MockLane(bam, genome)
-        anno = anno_tag_counts.GeneStranded(lane)
-        anno.count_strategy.disable_sanity_check = True
-        anno2 = anno_tag_counts.NormalizationFPKM(anno)
-        force_load(gr.add_annotator(anno2))
-        run_pipegraph()
-        df = gr.df.sort_values("gene_stable_id")
-
-        print(df)
-        print(np.array([4 * 1000 * 1e6 / 6000 / 1.0, 1 * 2000 * 1e6 / 6000 / 2.0]))
-        assert (
-            np.abs(
-                df[anno2.columns[0]]
-                - np.array([4 * 1000 * 1e6 / 6000 / 1.0, 1 * 2000 * 1e6 / 6000 / 2.0])
-            )
-            < 0.00001
-        ).all()
-
-
-@pytest.mark.usefixtures("both_ppg_and_no_ppg")
-class TestFPKMBiotypes:
-    def test_stranded_exon(self):
-
-        bam = MockBam("1", 10000, mode=4)
-        genes = pd.DataFrame(
-            [
-                {
-                    "gene_stable_id": "FakeA",
-                    "biotype": "non_coding",
-                    "name": "A",
-                    "tss": 0,
-                    "tes": 2000,
-                    "chr": "1",
-                    "strand": 1,
-                },
-                {
-                    "gene_stable_id": "FakeB",
-                    "biotype": "protein_coding",
-                    "name": "B",
-                    "tss": 4000,
-                    "tes": 2000,
-                    "chr": "1",
-                    "strand": -1,
-                },
-            ]
-        )
-        transcripts = pd.DataFrame(
-            [
-                {
-                    "name": "Fakea1",
-                    "chr": "1",
-                    "exons": [(500, 600)],
-                    "strand": 1,
-                    "gene_stable_id": "FakeA",
-                    "biotype": "misc_RNA",
-                },
-                {
-                    "name": "Fakeb1",
-                    "chr": "1",
-                    "exons": [(3900, 4000), (2900, 3000)],
-                    "strand": -1,
-                    "gene_stable_id": "FakeB",
-                    "biotype": "protein_coding",
-                },
-                {
-                    "name": "Fakeb2",
-                    "chr": "1",
-                    "exons": [(3900, 4000), (2000, 3000)],
-                    "strand": -1,
-                    "gene_stable_id": "FakeB",
-                    "biotype": "misc_RNA",
-                },
-                {
-                    "name": "Fakeb3",
-                    "chr": "1",
-                    "exons": [(3900, 4000), (2850, 3000)],
-                    "strand": -1,
-                    "gene_stable_id": "FakeB",
-                    "biotype": "protein_coding",
-                },
-            ]
-        )
-        genome = MockGenome(genes, transcripts, {"1": 10000})
-        gr = Genes(genome)
-        lane = MockLane(bam, genome)
-        anno = anno_tag_counts.ExonSmartStranded(lane)
-        anno.count_strategy.disable_sanity_check = True
-        anno2 = anno_tag_counts.NormalizationFPKMBiotypes(anno, ("protein_coding",))
-        with pytest.raises(ValueError):
-            anno_tag_counts.NormalizationFPKMBiotypes(anno, "protein_coding")
-
-        force_load(gr.add_annotator(anno2))
-        run_pipegraph()
-        df = gr.df.sort_values("gene_stable_id")
-        should = np.array([np.nan, 400 * 1e6 / 400.0 / 0.1])
-        delta = df[anno2.columns[0]] - should
-        assert ((np.abs(delta) < 0.00001) | (np.isnan(delta) == np.isnan(should))).all()
+    def test_fpkm_raises(self):
+        with pytest.raises(NotImplementedError):
+            anno_tag_counts.NormalizationFPKM(55)
 
 
 @pytest.mark.usefixtures("both_ppg_and_no_ppg")
@@ -2460,3 +2187,30 @@ class TestPPG:
         for anno in annos:
             j = g.anno_jobs[anno.get_cache_name()]
             assert j.cores_needed == -1
+
+    def test_qc(self, new_pipegraph):
+        import logging
+        new_pipegraph.new_pipegraph(quiet=False, log_file="logs/debug.log", log_level=logging.DEBUG)
+        import pypipegraph as ppg
+        ppg.util.global_pipegraph.quiet = False
+        from mbf_sampledata import get_human_22_fake_genome, get_sample_data
+        import mbf_align
+        genome = get_human_22_fake_genome()
+        with no_qc():
+            lane = mbf_align.AlignedSample(
+                "test_lane",
+                get_sample_data(Path("mbf_align/rnaseq_spliced_chr22.bam")),
+                genome,
+                False,
+                "AA123",
+            )  # index creation is automatic
+        genes = Genes(genome)
+        anno = anno_tag_counts.GeneStranded(lane)
+        normalized = anno_tag_counts.NormalizationTPM(anno)
+        genes += anno
+        genes += normalized
+        qc_jobs = do_qc()
+        run_pipegraph()
+        assert len(qc_jobs) == 2
+        assert_image_equal(qc_jobs[0].filenames[0])
+        assert_image_equal(qc_jobs[1].filenames[0], '_tpm')

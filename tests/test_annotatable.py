@@ -280,8 +280,9 @@ class Test_FromOldGenomics:
         assert (a.df["sequence"] == [0, 1, 2, 3]).all()
 
     def test_non_hashable_init__args(self):
-        with pytest.raises(TypeError):
-            FixedAnnotator("shu", ["h", "i", "j", "k"])
+        a = FixedAnnotator("shu", ["h", "i", "j", "k"])
+        b = FixedAnnotator("shu", ["h", "i", "j", "k"])
+        assert a is b
 
     def test_annotator_copying_parent_changed(self, new_pipegraph):
         # first run

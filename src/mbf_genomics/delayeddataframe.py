@@ -29,6 +29,11 @@ class DelayedDataFrame(object):
         else:
             self.result_dir = Path("results") / self.__class__.__name__ / self.name
         self.result_dir.mkdir(parents=True, exist_ok=True)
+        if isinstance(loading_function, pd.DataFrame):
+            # don't you just love lambda variable binding?
+            loading_function = (
+                lambda loading_function=loading_function: loading_function
+            )
 
         if ppg.util.global_pipegraph is None:
             self.load_strategy = Load_Direct(self, loading_function)
@@ -60,9 +65,20 @@ class DelayedDataFrame(object):
     def __iadd__(self, other):
         """Add and return self"""
         if isinstance(other, Annotator):
-            self.load_strategy.add_annotator(other)
-            # if hasattr(other, "register_qc"):
-            #    other.register_qc(self)
+            if ppg.inside_ppg():
+                if not self.has_annotator(other):
+                    self.load_strategy.add_annotator(other)
+                    if ppg.inside_ppg():
+                        if hasattr(other, "register_qc"):
+                            other.register_qc(self)
+                elif self.get_annotator(other.get_cache_name()) is not other:
+                    raise ValueError(
+                        "trying to add different annotators with identical cache_names\n%s\n%s"
+                        % (other, self.get_annotator(other.get_cache_name()))
+                    )
+            else:
+                self.load_strategy.add_annotator(other)
+
             return self
         else:
             return NotImplemented
@@ -72,13 +88,7 @@ class DelayedDataFrame(object):
         self += anno
         return self.anno_jobs[anno.get_cache_name()]
         """
-        if not self.has_annotator(anno):
-            self += anno
-        else:
-            if self.get_annotator(anno.get_cache_name()) is not anno:
-                raise ValueError(
-                    "trying to add different annotators with identical cache_names"
-                )
+        self += anno
         if self.load_strategy.build_deps:  # pragma: no branch
             return self.anno_jobs[anno.get_cache_name()]
 
@@ -456,7 +466,7 @@ class Load_PPG:
         job = ppg.DataLoadingJob(self.ddf.cache_dir / anno.get_cache_name(), load)
         job.depends_on(
             ppg.FunctionInvariant(
-                self.ddf.cache_dir / (anno.get_cache_name() + "_func"), anno.calc
+                self.ddf.cache_dir / (anno.get_cache_name() + "_funcv"), anno.calc
             ),
             self.ddf.parent.anno_jobs[anno.get_cache_name()],
             self.ddf.load(),
@@ -533,6 +543,6 @@ class Load_PPG:
         return job
 
     def annotate(self):
-        res = lambda: self.ddf.anno_jobs.values()  # noqa: E731
+        res = lambda: list(self.ddf.anno_jobs.values())  # noqa: E731
         res.job_id = self.ddf.name + "_annotate_callback"
         return res
