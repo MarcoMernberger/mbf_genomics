@@ -176,26 +176,7 @@ class CounterStrategyWeightedStranded(_CounterStrategyBase):
 
 
 class _IntervalStrategy:
-    def get_interval_trees(self, genome, chr):
-        import bx.intervals
-
-        by_chr = self._get_interval_tuples_by_chr(genome)
-        tree_forward = bx.intervals.IntervalTree()
-        tree_reverse = bx.intervals.IntervalTree()
-        gene_to_no = {}
-        ii = 0
-        for tup in by_chr[chr]:  # stable_id, strand, [starts], [stops]
-            length = 0
-            for start, stop in zip(tup[2], tup[3]):
-                if tup[1] == 1:
-                    tree_forward.insert_interval(bx.intervals.Interval(start, stop, ii))
-                else:
-                    tree_reverse.insert_interval(bx.intervals.Interval(start, stop, ii))
-                length += stop - start
-            gene_stable_id = tup[0]
-            gene_to_no[gene_stable_id] = ii
-            ii += 1
-        return tree_forward, tree_reverse, gene_to_no
+o
 
     def get_interval_lengths_by_gene(self, genome):
         by_chr = self._get_interval_tuples_by_chr(genome)
