@@ -23,6 +23,7 @@ class DelayedDataFrame(object):
     """
 
     def __init__(self, name, loading_function, dependencies=[], result_dir=None):
+        #assert_uniqueness_of_object is taking core of by the load_strategy
         self.name = name
         if result_dir:
             self.result_dir = Path(result_dir)
@@ -35,7 +36,7 @@ class DelayedDataFrame(object):
                 lambda loading_function=loading_function: loading_function
             )
 
-        if ppg.util.global_pipegraph is None:
+        if not ppg.inside_ppg():
             self.load_strategy = Load_Direct(self, loading_function)
         else:
             self.load_strategy = Load_PPG(self, loading_function, dependencies)
@@ -68,9 +69,8 @@ class DelayedDataFrame(object):
             if ppg.inside_ppg():
                 if not self.has_annotator(other):
                     self.load_strategy.add_annotator(other)
-                    if ppg.inside_ppg():
-                        if hasattr(other, "register_qc"):
-                            other.register_qc(self)
+                    if hasattr(other, "register_qc"):
+                        other.register_qc(self)
                 elif self.get_annotator(other.get_cache_name()) is not other:
                     raise ValueError(
                         "trying to add different annotators with identical cache_names\n%s\n%s"
@@ -176,7 +176,7 @@ class DelayedDataFrame(object):
 
     def _new_for_filtering(self, new_name, load_func, deps, **kwargs):
         if not "result_dir" in kwargs:
-            kwargs["result_dir"] = self.result_dir
+            kwargs["result_dir"] = self.result_dir / new_name
         return self.__class__(new_name, load_func, deps, **kwargs)
 
     def clone_without_annotators(
@@ -290,7 +290,7 @@ class Load_Direct:
         if anno.get_cache_name() in self.ddf.annotators:
             if self.ddf.annotators[anno.get_cache_name()] != anno:
                 raise ValueError(
-                    "Trying to add two diffeerent annotators with same cache name: %s and %s"
+                    "Trying to add two different annotators with same cache name: %s and %s"
                     % (anno, self.ddf.annotators[anno.get_cache_name()])
                 )
             return
@@ -371,14 +371,6 @@ class Load_PPG:
                 "annotator.column_names[0] not suitable as a cache_name (was %s), add cache_name property"
                 % repr(cache_name)
             )
-        if (
-            cache_name in self.ddf.annotators
-            and not self.ddf.annotators[cache_name] is anno
-        ):
-            raise ValueError(
-                "Trying to add two different Annotator objects with identical cache names (%s) to %s"
-                % (cache_name, self.ddf.name)
-            )
         if not cache_name in self.ddf.annotators:
             # if not hasattr(anno, "columns"): # handled by get_cache_name
             # raise AttributeError("no columns property on annotator %s" % repr(anno))
@@ -430,7 +422,10 @@ class Load_PPG:
             annos_here = set(node.ddf.annotators.values())
             deps = set()
             for a in annos_here:
-                deps.update(a.dep_annos())
+                new = a.dep_annos()
+                if None in new: # pragma: no cover
+                    raise ValueError("None returned in %s.dep_annos" % a)
+                deps.update(new)
             annos_here.update(deps)
             for anno in annos_here:
                 node.add_annotator(anno)

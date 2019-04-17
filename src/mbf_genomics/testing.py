@@ -5,8 +5,6 @@ from mbf_genomes import HardCodedGenome
 from pypipegraph.testing import run_pipegraph, force_load, RaisesDirectOrInsidePipegraph
 
 
-
-
 def MockGenome(df_genes, df_transcripts=None, chr_lengths=None):
     if chr_lengths is None:
         chr_lengths = {
@@ -35,7 +33,7 @@ def MockGenome(df_genes, df_transcripts=None, chr_lengths=None):
         df_genes = df_genes.assign(name=df_genes.gene_stable_id)
     df_genes = df_genes.sort_values(["chr", "start"])
     df_genes = df_genes.set_index("gene_stable_id")
-    if not df_genes.index.is_unique:
+    if not df_genes.index.is_unique:  # pragma: no cover
         raise ValueError("gene_stable_ids not unique")
     if df_transcripts is not None and len(df_transcripts):
         if not "transcript_stable_id" in df_transcripts.columns:
@@ -50,7 +48,7 @@ def MockGenome(df_genes, df_transcripts=None, chr_lengths=None):
                 name=df_transcripts.transcript_stable_id
             )
         if "exons" in df_transcripts.columns:
-            if len(df_transcripts["exons"].iloc[0]) == 3:
+            if len(df_transcripts["exons"].iloc[0]) == 3:  # pragma: no cover
                 df_transcripts = df_transcripts.assign(
                     exons=[(x[0], x[1]) for x in df_transcripts["exons"]]
                 )
@@ -61,9 +59,9 @@ def MockGenome(df_genes, df_transcripts=None, chr_lengths=None):
                 ]
             )
         stops = []
-        if not "strand" in df_transcripts:
+        if not "strand" in df_transcripts:  # pragma: no cover
             df_transcripts = df_transcripts.assign(strand=1)
-        if not "tss" in df_transcripts:
+        if not "tss" in df_transcripts: # pragma: no branch
             tss = []
             tes = []
             for tr, row in df_transcripts.iterrows():
@@ -82,7 +80,7 @@ def MockGenome(df_genes, df_transcripts=None, chr_lengths=None):
                 stops.append(max(row["tss"], row["tes"]))
             df_transcripts = df_transcripts.assign(start=starts, stop=stops)
         df_transcripts = df_transcripts.set_index("transcript_stable_id")
-        if not df_transcripts.index.is_unique:
+        if not df_transcripts.index.is_unique:  # pragma: no cover
             raise ValueError("transcript_stable_ids not unique")
     result = HardCodedGenome("dummy", chr_lengths, df_genes, df_transcripts, None)
     result.sanity_check_genes(df_genes)

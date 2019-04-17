@@ -11,7 +11,7 @@ import hashlib
 import pandas as pd
 from pathlib import Path
 from dppd import dppd
-from mbf_qualitycontrol import register_qc, QCCallback, get_qc
+from mbf_qualitycontrol import register_qc, QCCallback, get_qc, QCCollector
 
 dp, X = dppd()
 
@@ -43,14 +43,14 @@ class CounterStrategyStrandedRust(_CounterStrategyBase):
         gene_intervals = IntervalStrategyGene()._get_interval_tuples_by_chr(genome)
         from mbf_bam import count_reads_stranded
         import pprint
-        with open('/project/test_intervals', 'w') as op:
+
+        with open("/project/test_intervals", "w") as op:
             op.write(pprint.pformat(intervals))
-        with open('/project/test_gene_intervals', 'w') as op:
+        with open("/project/test_gene_intervals", "w") as op:
             op.write(pprint.pformat(gene_intervals))
 
         res = count_reads_stranded(
-            bam_filename, bam_index_name, 
-            intervals, gene_intervals,
+            bam_filename, bam_index_name, intervals, gene_intervals
         )
         self.sanity_check(res)
         return res
@@ -100,84 +100,7 @@ class CounterStrategyUnstrandedRust(_CounterStrategyBase):
         return res
 
 
-class CounterStrategyWeightedStranded(_CounterStrategyBase):
-    """Counts reads matching multiple genes as 1/hit_count
-    for each gene"""
-
-    name = "stranded+weighted"
-
-    def count_reads(
-        self, interval_strategy, genome, bam_filename, bam_index_name, reverse=False
-    ):
-        import pysam
-
-        bamfile = pysam.Samfile(bam_filename, index_filename=bam_index_name)
-        lookup = collections.defaultdict(int)
-        read_storage = {}
-        for chr, length in genome.get_chromosome_lengths().items():
-            tree_forward, tree_reverse, gene_to_no = interval_strategy.get_interval_trees(
-                genome, chr
-            )
-            no_to_gene = dict((v, k) for (k, v) in gene_to_no.items())
-
-            for read in bamfile.fetch(chr, 0, length):
-                if read.is_reverse:
-                    tree = tree_reverse
-                else:
-                    tree = tree_forward
-                genes_hit = set()
-                for sub_start, sub_stop in read.get_blocks():
-                    for x in tree.find(sub_start, sub_stop):
-                        genes_hit.add(
-                            no_to_gene[x.value]
-                        )  # this is the gene_to_no encoded number of the gene...
-                if genes_hit:
-                    count_per_hit = 1.0 / len(genes_hit)
-                else:
-                    count_per_hit = 1
-                nh = read.get_tag("NH")
-                if nh == 1:
-                    for gene_stable_id in genes_hit:
-                        lookup[gene_stable_id] += count_per_hit
-                else:
-                    if read.qname not in read_storage:
-                        read_storage[read.qname] = [(genes_hit, count_per_hit)]
-                    else:
-                        if (
-                            read_storage[read.qname] is False
-                        ):  # pragma: no cover defensive
-                            import pprint
-
-                            raise ValueError(
-                                "Unaccounted for reads: \n%s"
-                                % pprint.pformat(read_storage)[:10000]
-                            )
-                        read_storage[read.qname].append((genes_hit, count_per_hit))
-                        if (
-                            len(read_storage[read.qname]) == nh
-                        ):  # time to store the values
-                            all_hits = {}
-                            for genes_hit, count_per_hit in read_storage[read.qname]:
-                                for gene_stable_id in genes_hit:
-                                    all_hits[gene_stable_id] = count_per_hit
-                            per_hit = float(len(all_hits))
-                            for gene_stable_id in all_hits:
-                                lookup[gene_stable_id] += count_per_hit / per_hit
-                            read_storage[read.qname] = False
-        for x in read_storage.values():
-            if x is not False:
-                debug = [(x, y) for (x, y) in read_storage.items() if y is not False]
-                import pprint
-
-                raise ValueError(
-                    "Unaccounted for reads: \n%s" % pprint.pformat(debug)[:10000]
-                )
-        return lookup
-
-
 class _IntervalStrategy:
-o
-
     def get_interval_lengths_by_gene(self, genome):
         by_chr = self._get_interval_tuples_by_chr(genome)
         length_by_gene = {}
@@ -254,9 +177,99 @@ class IntervalStrategyExonSmart(_IntervalStrategy):
 
 
 # Now the actual tag count annotators
+class TagCountCommonQC:
+    def register_qc(self, genes):
+        self.register_qc_distribution(genes)
+        self.register_qc_pca(genes)
+
+    def register_qc_distribution(self, genes):
+        output_filename = genes.result_dir / self.qc_folder / f"read_distribution.png"
+        output_filename.parent.mkdir(exist_ok=True)
+
+        def get_qc_job(elements):
+            def plot():
+                df = genes.df
+                return (
+                    dp(df)
+                    .select({x.aligned_lane.name: x.columns[0] for x in elements})
+                    .melt(var_name="sample", value_name="count")
+                    .p9()
+                    .theme_bw()
+                    .annotation_stripes()
+                    .geom_violin(dp.aes("sample", "count"), width=0.5)
+                    .add_boxplot(
+                        x="sample", y="count", _width=0.1, _fill=None, _color="blue"
+                    )
+                    .scale_y_continuous(
+                        trans="log10", name=self.qc_distribution_scale_y_name
+                    )
+                    .turn_x_axis_labels()
+                    .hide_x_axis_title()
+                    .render(output_filename)
+                )
+
+            return ppg.FileGeneratingJob(output_filename, plot).depends_on(
+                [genes.add_annotator(x) for x in elements]
+            )
+
+        QCCollector(output_filename, get_qc_job, self)
+
+    def register_qc_pca(self, genes):
+        output_filename = genes.result_dir / self.qc_folder / f"pca.png"
+
+        def get_qc_job(elements):
+            def plot():
+                df = genes.df
+                import sklearn.decomposition as decom
+
+                pca = decom.PCA(n_components=2, whiten=False)
+                data = genes.df[[x.columns[0] for x in elements]]
+                data -= data.min()  # min max scaling 0..1
+                data /= data.max()
+                data = data[~pd.isnull(data).any(axis=1)]  # can' do pca on NAN values
+                pca.fit(data.T)
+                xy = pca.transform(data.T)
+                plot_df = pd.DataFrame(
+                    {
+                        "x": xy[:, 0],
+                        "y": xy[:, 1],
+                        "label": [x.plot_name for x in elements],
+                    }
+                )
+                (
+                    dp(plot_df)
+                    .p9()
+                    .theme_bw()
+                    .add_scatter("x", "y")
+                    .add_text(
+                        "x",
+                        "y",
+                        "label",
+                        _adjust_text={
+                            "expand_points": (2, 2),
+                            "arrowprops": {"arrowstyle": "->", "color": "red"},
+                        },
+                    )
+                    .scale_color_many_categories()
+                    .title(
+                        "PCA %s\nExplained variance: x %.2f%%, y %.2f%%"
+                        % (
+                            genes.name,
+                            pca.explained_variance_ratio_[0] * 100,
+                            pca.explained_variance_ratio_[1] * 100,
+                        )
+                    )
+                    .render(output_filename, width=8, height=6)
+                )
+
+            return ppg.FileGeneratingJob(output_filename, plot).depends_on(
+                [genes.add_annotator(x) for x in elements]
+            )
+
+        QCCollector(output_filename, get_qc_job, self)
 
 
-class _FastTagCounter(Annotator):
+class _FastTagCounter(Annotator, TagCountCommonQC):
     def __init__(
         self, aligned_lane, count_strategy, interval_strategy, column_name, column_desc
     ):
@@ -271,6 +284,9 @@ class _FastTagCounter(Annotator):
         self.column_properties = {self.columns[0]: {"description": column_desc}}
         self.vid = aligned_lane.vid
         self.cores_needed = count_strategy.cores_needed
+        self.plot_name = self.aligned_lane.name
+        self.qc_folder = f"{self.count_strategy.name}_{self.interval_strategy.name}"
+        self.qc_distribution_scale_y_name = "raw counts"
 
     def calc(self, df):
         if ppg.inside_ppg():
@@ -299,55 +315,6 @@ class _FastTagCounter(Annotator):
         return ppg.CachedAttributeLoadingJob(
             cf / self.cache_name, self, "_data", self.calc_data
         ).depends_on(self.aligned_lane.load())
-
-    def register_qc(self, genes):
-        self.register_qc_distribution(genes)
-
-    def register_qc_distribution(self, genes):
-        import plotnine as p9
-        output_filename = (
-            genes.result_dir / f"read_count_distribution_{self.count_strategy.name}"
-            f"_{self.interval_strategy.name}.png"
-        )
-        try:
-            q = get_qc(output_filename)
-        except KeyError:
-
-            class TagCountQCDistribution:
-                def __init__(self):
-                    self.annos = set()
-
-                def get_qc_job(self):
-                    def plot():
-                        df = genes.df
-                        return (
-                            dp(df)
-                            .select({x.aligned_lane.name: x.columns[0] for x in self.annos})
-                            .melt(var_name="sample", value_name="count")
-                            .p9()
-                            .theme_bw()
-                            .annotation_stripes()
-                            .geom_violin(p9.aes("sample", "count"), width=0.5)
-                            .add_boxplot(
-                                x="sample",
-                                y="count",
-                                _width=0.1,
-                                _fill=None,
-                                _color="blue",
-                            )
-                            .scale_y_continuous(trans='log10')
-                            .turn_x_axis_labels()
-                            .hide_x_axis_title()
-                            .render(output_filename)
-                        )
-
-                    return ppg.FileGeneratingJob(output_filename, plot).depends_on(
-                        [genes.add_annotator(x) for x in self.annos]
-                    )
-
-            q = TagCountQCDistribution()
-            register_qc(output_filename, q)
-        q.annos.add(self)
 
 
 # ## Raw tag count annos for analysis usage
@@ -401,18 +368,6 @@ class ExonUnstrandedRust(_FastTagCounter):
         )
 
 
-class ExonSmartWeightedStranded(_FastTagCounter):
-    def __init__(self, aligned_lane):
-        _FastTagCounter.__init__(
-            self,
-            aligned_lane,
-            CounterStrategyWeightedStranded(),
-            IntervalStrategyExonSmart(),
-            "Exon, protein coding, weighted stranded tag count %s",
-            "Tag count inside exons of protein coding transcripts (all if no protein coding transcripts) exons, correct strand only. Multi-matching reads proportionally allocated",
-        )
-
-
 class GeneStrandedRust(_FastTagCounter):
     def __init__(self, aligned_lane):
         _FastTagCounter.__init__(
@@ -447,111 +402,83 @@ ExonSmartUnstranded = ExonSmartUnstrandedRust
 
 # ## Normalizing annotators - convert raw tag counts into something normalized
 
-class NormalizationAnnotator(Annotator):
 
-    def register_qc(self, genes):
-        self.register_qc_distribution(genes)
+class _NormalizationAnno(Annotator, TagCountCommonQC):
+    def __init__(self, base_column_spec):
+        from ..util import parse_a_or_c_to_anno, parse_a_or_c_to_column
 
-    def register_qc_distribution(self, genes):
-        import plotnine as p9
-        output_filename = (
-            genes.result_dir / f"normalized_{self.name}_read_count_distribution_{self.raw_anno.count_strategy.name}"
-            f"_{self.raw_anno.interval_strategy.name}.png"
-        )
-        try:
-            q = get_qc(output_filename)
-        except KeyError:
+        self.raw_anno = parse_a_or_c_to_anno(base_column_spec)
+        self.raw_column = parse_a_or_c_to_column(base_column_spec)
+        if self.raw_anno is not None:
+            self.genome = self.raw_anno.genome
+            self.vid = self.raw_anno.vid
+            self.aligned_lane = self.raw_anno.aligned_lane
+        else:
+            self.genome = None
+            self.vid = None
+            self.aligned_lane = None
+        self.columns = [self.raw_column + " " + self.name]
+        self.cache_name = hashlib.md5(self.columns[0].encode("utf-8")).hexdigest()
+        if self.raw_anno is not None:
+            self.plot_name = self.raw_anno.plot_name
+            self.qc_folder = f"normalized_{self.name}_{self.raw_anno.count_strategy.name}_{self.raw_anno.interval_strategy.name}"
+        else:
+            self.plot_name = self.raw_column
+            self.qc_folder = f"normalized_{self.name}"
+        self.qc_distribution_scale_y_name = self.name
 
-            class TagCountQCDistribution:
-                def __init__(self):
-                    self.annos = set()
-
-                def get_qc_job(self):
-                    def plot():
-                        df = genes.df
-                        return (
-                            dp(df)
-                            .select({x.aligned_lane.name: x.columns[0] for x in self.annos})
-                            .melt(var_name="sample", value_name='count')
-                            .p9()
-                            .theme_bw()
-                            .annotation_stripes()
-                            .geom_violin(p9.aes("sample", 'count'), width=0.5)
-                            .add_boxplot(
-                                x="sample",
-                                y='count',
-                                _width=0.1,
-                                _fill=None,
-                                _color="blue",
-                            )
-                            .scale_y_continuous(trans='log10', name=next(iter(self.annos)).name)
-                            .turn_x_axis_labels()
-                            .hide_x_axis_title()
-                            .render(output_filename)
-                        )
-
-                    return ppg.FileGeneratingJob(output_filename, plot).depends_on(
-                        [genes.add_annotator(x) for x in self.annos]
-                    )
-
-            q = TagCountQCDistribution()
-            register_qc(output_filename, q)
-        q.annos.add(self)
+    def dep_annos(self):
+        if self.raw_anno is None:
+            return []
+        else:
+            return [self.raw_anno]
 
 
-class NormalizationCPM(NormalizationAnnotator):
+class NormalizationCPM(_NormalizationAnno):
     """Normalize to 1e6 by taking the sum of all genes"""
 
-    def __init__(self, raw_anno):
-        self.name = 'CPM'
-        self.genome = raw_anno.genome
-        self.raw_anno = raw_anno
-        self.vid = raw_anno.vid
+    def __init__(self, base_column_spec):
+        self.name = "CPM"
         self.normalize_to = 1e6
-        self.aligned_lane = raw_anno.aligned_lane
-        self.columns = [self.raw_anno.columns[0] + " CPM"]
-        self.cache_name = hashlib.md5(self.columns[0].encode("utf-8")).hexdigest()
+        super().__init__(base_column_spec)
         self.column_properties = {
             self.columns[0]: {
                 "description": "Tag count inside protein coding (all if no protein coding transcripts) exons, normalized to 1e6 across all genes"
             }
         }
 
-    def dep_annos(self):
-        return [self.raw_anno]
-
     def calc(self, df):
-        raw_counts = df[self.raw_anno.columns[0]]
+        raw_counts = df[self.raw_column]
         total = float(raw_counts.sum())
         result = raw_counts * (self.normalize_to / total)
         return pd.Series(result)
 
 
-class NormalizationTPM(NormalizationAnnotator):
+class NormalizationTPM(_NormalizationAnno):
     """Normalize to transcripts per million, ie.
         count / length * (1e6 / (sum_i(count_/length_i)))
 
     """
 
-    def __init__(self, raw_anno):
-        self.name = 'TPM'
-        self.genome = raw_anno.genome
-        self.raw_anno = raw_anno
-        self.vid = raw_anno.vid
+    def __init__(self, base_column_spec, interval_strategy=None):
+        self.name = "TPM"
         self.normalize_to = 1e6
-        self.aligned_lane = raw_anno.aligned_lane
-        self.columns = [self.raw_anno.columns[0] + " TPM"]
-        self.cache_name = hashlib.md5(self.columns[0].encode("utf-8")).hexdigest()
+        super().__init__(base_column_spec)
+        if self.raw_anno is None:  # pragma: no cover
+            if interval_strategy is None:  # pragma: no cover
+                raise ValueError(
+                    "TPM normalization needs to know the intervals used. Either base of a FastTagCount annotator or pass in an interval strategy"
+                )
+            self.interval_strategy = interval_strategy
+        else:
+            self.interval_strategy = self.raw_anno.interval_strategy
         self.column_properties = {
             self.columns[0]: {"description": "transcripts per million"}
         }
 
-    def dep_annos(self):
-        return [self.raw_anno]
-
     def calc(self, df):
-        raw_counts = df[self.raw_anno.columns[0]]
-        length_by_gene = self.raw_anno.interval_strategy.get_interval_lengths_by_gene(
+        raw_counts = df[self.raw_column]
+        length_by_gene = self.interval_strategy.get_interval_lengths_by_gene(
             self.genome
         )
         result = np.zeros(raw_counts.shape, float)

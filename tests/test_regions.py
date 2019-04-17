@@ -779,16 +779,13 @@ class TestGenomicRegionsLoading:
                     "stop": [100, 120, 1110, 11110, 111_110],
                 }
             )
+
         a = regions.GenomicRegions(
-                "shu",
-                sample_data,
-                [],
-                get_genome_chr_length(),
-                on_overlap="merge",
+            "shu", sample_data, [], get_genome_chr_length(), on_overlap="merge"
         )
         force_load(a.load())
         run_pipegraph()
-        assert not 'strand' in a.df.columns
+        assert not "strand" in a.df.columns
 
     def test_plot_job(self):
         def sample_data():
@@ -1761,6 +1758,12 @@ class TestSetOperationsOnGenomicRegions:
         should = [(10, 80), (400, 450)]
         self.handle(a, b, should, regions.GenomicRegions_Difference)
 
+    def test_difference_split_joins(self):
+        a = [(0, 1000),]
+        b = [(500, 1000), ]
+        should = [(0, 500), ]
+        self.handle(a, b, should, regions.GenomicRegions_Difference)
+
     def test_difference_removes_annos(self):
         a = [(10, 100), (400, 450)]
         ca1 = Constant("one", 1)
@@ -1961,9 +1964,9 @@ class TestSetOperationsOnGenomicRegions:
         c = regions.GenomicRegions_Invert("c", b)
         force_load(c.load())
         run_pipegraph()
-        assert not 'strand' in a.df.columns
-        assert not 'strand' in b.df.columns
-        assert not 'strand' in c.df.columns
+        assert not "strand" in a.df.columns
+        assert not "strand" in b.df.columns
+        assert not "strand" in c.df.columns
         assert (c.df == a.df).all().all()
 
     def test_invert_preserves_annos(self):
@@ -2390,9 +2393,38 @@ class TestFromXYZ:
             else:
                 assert round(abs(val - should[ii]), 7) == 0
 
+    def test_wig(self):
+        a = regions.GenomicRegions_FromWig(
+            "shu", get_sample_data("mbf_genomics/test.wig"), get_genome_chr_length(),
+            1,2
+        )
+        force_load(a.load())
+        run_pipegraph()
+        assert len(a.df) == 6
+        assert (a.df["chr"] == ["2", "2", "2", "3", "3", "3"]).all()
+        assert (
+            a.df["start"] == [2-1,41-1,81-1,120-1,158-1]
+        ).all()
+        assert (
+            a.df["stop"] == [37+2,76+2,116+2,155+2,193+2]).all()
+
+
+
+    def test_bigbed(self):
+        a = regions.GenomicRegions_FromBigBed(
+            "shu", get_sample_data("mbf_genomics/test.bb"), get_genome_chr_length()
+        )
+        force_load(a.load())
+        run_pipegraph()
+        assert (
+            a.df["start"][:5].values == [199_288, 263_869, 264_202, 264_596, 268_492]
+        ).all()
+
     def test_bed_without_score(self):
         a = regions.GenomicRegions_FromBed(
-            "shu", get_sample_data("mbf_genomics/test_noscore.bed"), get_genome_chr_length()
+            "shu",
+            get_sample_data("mbf_genomics/test_noscore.bed"),
+            get_genome_chr_length(),
         )
         force_load(a.load())
         run_pipegraph()
@@ -2406,7 +2438,9 @@ class TestFromXYZ:
 
     def test_bed_constant_name(self):
         a = regions.GenomicRegions_FromBed(
-            "shu", get_sample_data("mbf_genomics/test_constant_name.bed"), get_genome_chr_length()
+            "shu",
+            get_sample_data("mbf_genomics/test_constant_name.bed"),
+            get_genome_chr_length(),
         )
         force_load(a.load())
         run_pipegraph()
@@ -2420,13 +2454,17 @@ class TestFromXYZ:
     def test_empty_bed(self):
         with RaisesDirectOrInsidePipegraph(ValueError):
             a = regions.GenomicRegions_FromBed(
-                "shu", get_sample_data("mbf_genomics/test_empty.bed"), get_genome_chr_length()
+                "shu",
+                get_sample_data("mbf_genomics/test_empty.bed"),
+                get_genome_chr_length(),
             )
             force_load(a.load())
 
     def test_bed_without_score(self):
         a = regions.GenomicRegions_FromBed(
-            "shu", get_sample_data("mbf_genomics/test_without_score.bed"), get_genome_chr_length()
+            "shu",
+            get_sample_data("mbf_genomics/test_without_score.bed"),
+            get_genome_chr_length(),
         )
         force_load(a.load())
         run_pipegraph()
@@ -2467,7 +2505,9 @@ class TestFromXYZ:
 
     def test_partec(self):
         a = regions.GenomicRegions_FromPartec(
-            "shu", get_sample_data("mbf_genomics/test_partec.txt"), get_genome_chr_length()
+            "shu",
+            get_sample_data("mbf_genomics/test_partec.txt"),
+            get_genome_chr_length(),
         )
         force_load(a.load())
         run_pipegraph()
@@ -2481,6 +2521,31 @@ class TestFromXYZ:
             a.df["stop"]
             == [119_019_245, 33_327_690, 216_002_792, 45_934_151, 138_423_806]
         ).all()
+
+    def test_binned(self):
+        genome = get_genome_chr_length()
+        with pytest.raises(ValueError):
+            regions.GenomicRegions_BinnedGenome(genome, 10000, '1')
+        a = regions.GenomicRegions_BinnedGenome(genome, 10000, ['1'])
+        b = regions.GenomicRegions_BinnedGenome(genome, 10000, new_name='full_bins')
+        force_load(a.load())
+        force_load(b.load())
+        run_pipegraph()
+        assert len(a.df) == 10
+        assert len(b.df) == 10 + 20 + 30 + 40 + 50
+
+    def test_windowed(self):
+        genome = get_genome_chr_length()
+        a = regions.GenomicRegions_Windows(genome, 'win1', 10000,0, ['1'])
+        b = regions.GenomicRegions_Windows(genome, 'win2', 10000,10000, ['1'])
+        c = regions.GenomicRegions_Windows(genome, 'win3', 10000,0)
+        force_load(a.load())
+        force_load(b.load())
+        force_load(c.load())
+        run_pipegraph()
+        assert len(a.df) == 10
+        assert len(b.df) == 5
+        assert len(c.df) == 10 + 20 + 30 + 40 + 50
 
 
 @pytest.mark.usefixtures("no_pipegraph")
@@ -2505,4 +2570,3 @@ class TestOutsideOfPipegraph:
         assert counter[0] == 1
         a.load()
         assert counter[0] == 1
-

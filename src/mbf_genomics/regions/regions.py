@@ -17,28 +17,6 @@ from mbf_nested_intervals import (
 )
 
 
-def get_overlapping_interval_indices(
-    start, stop, start_array, stop_array, handle_overlapping
-):
-    """Return the indices of all intervals stored in start_array, stop_array that overlap start, stop"""
-    # TODO: replace with better algorithm - e.g. rustbio intervl trees
-    if not handle_overlapping:
-        first_start_smaller = np.searchsorted(start_array, start) - 1
-        first_end_larger = np.searchsorted(stop_array, stop, "right") + 1
-    else:
-        first_start_smaller = 0
-        first_end_larger = len(stop_array)
-    result = []
-    for possible_match in range(
-        max(0, first_start_smaller), min(first_end_larger, len(stop_array))
-    ):
-        s = max(start, start_array[possible_match])
-        e = min(stop, stop_array[possible_match])
-        if s < e:
-            result.append(possible_match)
-    return result
-
-
 def merge_identical_but_raise_on_further_overlap(df):
     def iv_func(iv):
         iv = iv.remove_duplicates()
@@ -49,8 +27,6 @@ def merge_identical_but_raise_on_further_overlap(df):
         return iv
 
     res = merge_df_intervals(df, iv_func)
-    if res is None:
-        raise ValueError()
     return res
 
 
@@ -417,7 +393,7 @@ class GenomicRegions(DelayedDataFrame):
         if not chr in self._interval_sets:
             return self.df[0:0]
         res = self._interval_sets[chr].find_closest_start(point)
-        if res is None:
+        if res is None:  # pragma: no cover
             return self.df[0:0]
         start, stop, ids = res
         return self.df.loc[ids]

@@ -71,7 +71,7 @@ def GenomicRegions_FromGFF(
             del data["name"]
         return pd.DataFrame(data)
 
-    if alternative_class is None:
+    if alternative_class is None:  # pragma: no cover
         alternative_class = GenomicRegions
     if ppg.inside_ppg():
         deps = [
@@ -117,10 +117,8 @@ def GenomicRegions_FromWig(
     def load():
         df = wiggle_to_intervals(filename, comment_char=comment_char)
         df["chr"] = [to_string(x) for x in df["chr"]]
-        if enlarge_5prime:
-            df["start"] -= enlarge_5prime
-        if enlarge_3prime:
-            df["stop"] += enlarge_3prime
+        df["start"] -= enlarge_5prime
+        df["stop"] += enlarge_3prime
         return df
 
     if ppg.inside_ppg():
@@ -137,7 +135,7 @@ def GenomicRegions_FromBed(
     name,
     filename,
     genome,
-    chromosome_mangler=None,
+    chromosome_mangler=lambda x: x,
     on_overlap="raise",
     filter_invalid_chromosomes=False,
     summit_annotator=None,
@@ -148,9 +146,6 @@ def GenomicRegions_FromBed(
 
     The resulting GenomicRegions has a column 'Score' that contains the wiggle score"""
     from mbf_fileformats.bed import read_bed
-
-    if chromosome_mangler is None:
-        chromosome_mangler = lambda x: x  # noqa:E731
 
     def load():
         valid_chromosomes = set(genome.get_chromosome_lengths())
@@ -167,7 +162,7 @@ def GenomicRegions_FromBed(
         data["strand"] = np.array([e.strand for e in entries], dtype=np.int8)
         data["name"] = np.array([to_string(e.name) for e in entries], dtype=np.object)
         data = pd.DataFrame(data)
-        if filter_invalid_chromosomes:
+        if filter_invalid_chromosomes:  # pragma: no cover
             keep = [x in valid_chromosomes for x in data["chr"]]
             data = data[keep]
         res = data
@@ -203,7 +198,7 @@ def GenomicRegions_FromBigBed(
     name,
     filename,
     genome,
-    chromosome_mangler=None,
+    chromosome_mangler=lambda x: x,
     on_overlap="raise",
     summit_annotator=None,
     sheet_name=None,
@@ -215,14 +210,12 @@ def GenomicRegions_FromBigBed(
     """
     from mbf_fileformats.bed import read_bigbed
 
-    if chromosome_mangler is None:
-        chromosome_mangler = lambda x: x  # noqa:E731
 
     def load():
         res = read_bigbed(filename, genome.get_chromosome_lengths(), chromosome_mangler)
         if (res["strand"] == 1).all():
             res = res.drop("strand", axis=1)
-        if len(res) == 0:
+        if len(res) == 0:  # pragma: no cover
             raise ValueError(
                 "Emtpty BigBed file (or wrong chromosome names)- %s" % filename
             )
@@ -254,7 +247,7 @@ def GenomicRegions_BinnedGenome(
     """Create GenomicRegions than partition a given chromosome in bins
     of @bin_size bp
     """
-    if limit_to_chromosomes and not hasattr(limit_to_chromosomes, "__iter__"):
+    if limit_to_chromosomes and not isinstance(limit_to_chromosomes, list):
         raise ValueError("Limit_to_chromosomes must be a list")
 
     def load():
@@ -267,7 +260,7 @@ def GenomicRegions_BinnedGenome(
             ]
         else:
             chr_plus_length = genome.get_chromosome_lengths().items()
-        if not chr_plus_length:
+        if not chr_plus_length:  # pragma: no cover
             raise ValueError("No chromosomes generated")
         for chr, chr_len in chr_plus_length:
             no_of_bins = int(math.ceil(float(chr_len) / bin_size))
@@ -287,10 +280,7 @@ def GenomicRegions_BinnedGenome(
 
 
 def GenomicRegions_Union(
-    name,
-    list_of_grs,
-    summit_annotator=None,
-    sheet_name="Overlaps",
+    name, list_of_grs, summit_annotator=None, sheet_name="Overlaps"
 ):
     """Combine serveral GRs into one.
 
@@ -303,13 +293,12 @@ def GenomicRegions_Union(
     def load():
         dfs = [x.df[["chr", "start", "stop"]] for x in list_of_grs]
         return pd.concat(dfs, axis=0)
-   
+
     if ppg.inside_ppg():
         deps = [x.load() for x in list_of_grs]
         deps.append(
             ppg.ParameterInvariant(
-                name + "_input_grs",
-                list(sorted([x.name for x in list_of_grs])),
+                name + "_input_grs", list(sorted([x.name for x in list_of_grs]))
             )
         )
     else:
@@ -390,12 +379,15 @@ def GenomicRegions_Invert(new_name, gr, summit_annotator=None, sheet_name="Inver
     def do_load():
         from mbf_nested_intervals import IntervalSet
         import itertools
+
         df = gr.df
         joined = []
-        for ii, (chr, start, stop) in enumerate(zip(df['chr'], df['start'], df['stop'])):
+        for ii, (chr, start, stop) in enumerate(
+            zip(df["chr"], df["start"], df["stop"])
+        ):
             joined.append(((chr), start, stop, ii))
         joined.sort(key=lambda tup: tup[0])
- 
+
         out = []
         chr_lengths = gr.genome.get_chromosome_lengths()
         seen = set()
@@ -403,10 +395,14 @@ def GenomicRegions_Invert(new_name, gr, summit_annotator=None, sheet_name="Inver
             args = [x[1:] for x in sub_group]
             iv = IntervalSet.from_tuples_with_id(args)
             new_order = iv.invert(0, chr_lengths[chr]).to_numpy()
-            out.append(pd.DataFrame({"start": new_order[0], 'stop': new_order[1], 'chr': chr}))
+            out.append(
+                pd.DataFrame({"start": new_order[0], "stop": new_order[1], "chr": chr})
+            )
             seen.add(chr)
         for chr in chr_lengths.keys() - seen:
-            out.append(pd.DataFrame({"start": [0], 'stop': [chr_lengths[chr]], 'chr': chr}))
+            out.append(
+                pd.DataFrame({"start": [0], "stop": [chr_lengths[chr]], "chr": chr})
+            )
 
         return pd.concat(out)
 
@@ -596,12 +592,12 @@ def GenomicRegions_FromTable(
         df = reader(filename)
         df["chr"] = df[chr_column].astype(str)
         df["start"] = df[start_column].astype(int)
-        if one_based:
+        if one_based:  # pragma: no cover
             df["start"] -= 1
         df["stop"] = df[stop_column].astype(int)
-        if drop_further_columns:
+        if drop_further_columns:  # pragma: no cover
             df = df[["chr", "start", "stop"]]
-        if filter_func:
+        if filter_func:  # pragma: no cover
             df = filter_func(df)
         return df
 
@@ -640,11 +636,11 @@ def GenomicRegions_CommonInAtLeastX(
                 if gr.has_overlapping(row["chr"], row["start"], row["stop"]):
                     count += 1
             keep[ii] = count >= X
-        if not keep.any():
+        if not keep.any():  # pragma: no cover
             raise ValueError("Filtered all of them")
         return union.iloc[keep]
 
-    if len(set([x.genome for x in list_of_grs])) > 1:
+    if len(set([x.genome for x in list_of_grs])) > 1:  # pragma: no cover
         raise ValueError("Can only merge GenomicRegions that have the same genome")
     if ppg.inside_ppg():
         deps = [x.load() for x in list_of_grs]
@@ -668,6 +664,7 @@ def GenomicRegions_CommonInAtLeastX(
         vid=vid,
     )
 
+
 def GenomicRegions_Windows(
     genome,
     name,
@@ -678,6 +675,8 @@ def GenomicRegions_Windows(
 ):
     """Create a GenomicRegions that has a window of size @window_size (0 for next to each other), windows are spaced @window_spacing
     across all or a @subset_of_chromosomes"""
+    if isinstance(genome, str):  # pragma: no cover
+        raise TypeError("Wrong arguments, genome must be first")
 
     def load():
         chrs_to_include = list(

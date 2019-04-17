@@ -2,7 +2,8 @@ import pytest
 from pathlib import Path
 import numpy as np
 import pandas as pd
-from mbf_genomics.genes.anno_tag_counts import IntervalStrategyGene
+from mbf_genomics.genes.anno_tag_counts import IntervalStrategyIntron
+
 from mbf_genomics.genes import Genes, anno_tag_counts
 from mbf_qualitycontrol import do_qc, no_qc
 from mbf_qualitycontrol.testing import assert_image_equal
@@ -508,76 +509,6 @@ class TestExonSmartCount:
         gr = Genes(genome)
         lane = MockLane(bam, genome)
         anno = anno_tag_counts.ExonSmartStranded(lane)
-        anno.count_strategy.disable_sanity_check = True
-        force_load(gr.add_annotator(anno))
-        run_pipegraph()
-        df = gr.df.sort_values("name")
-        print(df)
-        assert (df[anno.columns[0]] == np.array([100 * 4, (100 + 150) * 1])).all()
-
-    def test_stranded_weighted(self):
-
-        bam = MockBam("1", 10000, mode=4)
-        genes = pd.DataFrame(
-            [
-                {
-                    "gene_stable_id": "FakeA",
-                    "name": "A",
-                    "tss": 500,
-                    "tes": 600,
-                    "chr": "1",
-                    "strand": 1,
-                },
-                {
-                    "gene_stable_id": "FakeB",
-                    "name": "B",
-                    "tss": 4000,
-                    "tes": 2000,
-                    "chr": "1",
-                    "strand": -1,
-                },
-            ]
-        )
-        transcripts = pd.DataFrame(
-            [
-                {
-                    "name": "Fakea1",
-                    "chr": "1",
-                    "exons": [(500, 600)],
-                    "strand": 1,
-                    "gene_stable_id": "FakeA",
-                    "biotype": "misc_RNA",
-                },
-                {
-                    "name": "Fakeb1",
-                    "chr": "1",
-                    "exons": [(3900, 4000), (2900, 3000)],
-                    "strand": -1,
-                    "gene_stable_id": "FakeB",
-                    "biotype": "protein_coding",
-                },
-                {
-                    "name": "Fakeb2",
-                    "chr": "1",
-                    "exons": [(3900, 4000), (2000, 3000)],
-                    "strand": -1,
-                    "gene_stable_id": "FakeB",
-                    "biotype": "misc_RNA",
-                },
-                {
-                    "name": "Fakeb3",
-                    "chr": "1",
-                    "exons": [(3900, 4000), (2850, 3000)],
-                    "strand": -1,
-                    "gene_stable_id": "FakeB",
-                    "biotype": "protein_coding",
-                },
-            ]
-        )
-        genome = MockGenome(genes, transcripts, {"1": 10000})
-        gr = Genes(genome)
-        lane = MockLane(bam, genome)
-        anno = anno_tag_counts.ExonSmartWeightedStranded(lane)
         anno.count_strategy.disable_sanity_check = True
         force_load(gr.add_annotator(anno))
         run_pipegraph()
@@ -1287,813 +1218,25 @@ class TestTPMBiotypes:
             gr_biotype.df[anno3.columns[0]][0] == gr_biotype.df[anno2.columns[0]][0]
         ).all()
 
-
-class TestFPKM:
-    def test_fpkm_raises(self):
-        with pytest.raises(NotImplementedError):
-            anno_tag_counts.NormalizationFPKM(55)
-
-
-@pytest.mark.usefixtures("both_ppg_and_no_ppg")
-class TestWeigthedCounts:
-
-    # i need to test
-    # a) reads only partialy mapping a gene
-    # b) a read that only maps one gene
-    # c) a read that's mapped twice, to multiple genes
-    # d) a read that's mapped twice to one gene
-    # e) a read that's mapped twice, second time outside of a gene (how do
-    # we count that?! - very carefully, we only consider reads within our
-    # reference intervals!)
-
-    # f) a read that's mappend once, but there are two genes there
-    # g) a read that's mapped multiple times, once to two genes
-    # f) a read that's mapped multiple times, both times within overlapping genes
-    # g) a read that's spliced over two genes
-
-    def test_partial_mapping(self):
-        # handles a and b
-
-        bam = MockBamFixed(
-            [
-                # matches geneA, partial -> 1 count
-                {"strand": 1, "regions": [(10, 20)], "tags": {"NH": 1}}
-            ]
-        )
+    def test_interval_strategy_intron(self):
         genes = pd.DataFrame(
             [
                 {
                     "gene_stable_id": "FakeA",
-                    "name": "A",
-                    "tss": 15,
-                    "tes": 300,
-                    "chr": "1",
-                },
-                {
-                    "gene_stable_id": "FakeB",
-                    "name": "B",
-                    "tss": 300,
-                    "tes": 15,
-                    "chr": "1",
-                },
-            ]
-        )
-        transcripts = pd.DataFrame({"name": [], "chr": [], "exons": [], "strand": []})
-        genome = MockGenome(genes, transcripts, {"1": 10000})
-        count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
-        interval_strategy = IntervalStrategyGene()
-        lookup = count_strategy.count_reads(
-            interval_strategy,
-            genome,
-            bam.filename.decode("utf-8"),
-            bam.filename.decode("utf-8") + ".bai",
-        )
-        assert lookup["FakeA"] == 1
-        assert lookup["FakeB"] == 0
-
-    def test_no_tag_raises(self):
-        # handles c
-
-        bam = MockBamFixed(
-            [
-                # same read, just a different alignment
-                {"strand": 1, "regions": [(1010, 1020)], "tags": {}, "qname": "read0"}
-            ]
-        )
-        genes = pd.DataFrame(
-            [
-                {
-                    "gene_stable_id": "FakeB",
-                    "name": "B",
-                    "tss": 0,
-                    "tes": 1200,
-                    "chr": "1",
-                }
-            ]
-        )
-        transcripts = pd.DataFrame({"name": [], "chr": [], "exons": [], "strand": []})
-        genome = MockGenome(genes, transcripts, {"1": 10000})
-        count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
-        interval_strategy = IntervalStrategyGene()
-
-        with pytest.raises(KeyError):
-            count_strategy.count_reads(
-                interval_strategy,
-                genome,
-                bam.filename.decode("utf-8"),
-                bam.filename.decode("utf-8") + ".bai",
-            )
-
-        # self.assertEqual(lookup['FakeA'], 1)  # no tag -> count them both
-        # self.assertEqual(lookup['FakeB'], 1)
-
-    def test_unaccounted_reads_raise(self):
-
-        bam = MockBamFixed(
-            [
-                # guess the second one newer shows up
-                {
-                    "strand": 1,
-                    "regions": [(1010, 1020)],
-                    "tags": {"NH": 2},
-                    "qname": "read0",
-                }
-            ]
-        )
-        genes = pd.DataFrame(
-            [
-                {
-                    "gene_stable_id": "FakeB",
-                    "name": "B",
-                    "tss": 1000,
-                    "tes": 1200,
-                    "chr": "1",
-                }
-            ]
-        )
-        transcripts = pd.DataFrame({"name": [], "chr": [], "exons": [], "strand": []})
-        genome = MockGenome(genes, transcripts, {"1": 10000})
-        count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
-        interval_strategy = IntervalStrategyGene()
-
-        with pytest.raises(ValueError):
-            count_strategy.count_reads(
-                interval_strategy,
-                genome,
-                bam.filename.decode("utf-8"),
-                bam.filename.decode("utf-8") + ".bai",
-            )
-
-    def test_one_too_many_raises_nh_1(self):
-
-        bam = MockBamFixed(
-            [
-                # guess the second one newer shows up
-                {
-                    "strand": 1,
-                    "regions": [(1010, 1020)],
-                    "tags": {"NH": 1},
-                    "qname": "read0",
-                },
-                # guess the second one newer shows up
-                {
-                    "strand": 1,
-                    "regions": [(1010, 1020)],
-                    "tags": {"NH": 1},
-                    "qname": "read0",
-                },
-            ]
-        )
-        genes = pd.DataFrame(
-            [
-                {
-                    "gene_stable_id": "FakeB",
-                    "name": "B",
-                    "tss": 1000,
-                    "tes": 1200,
-                    "chr": "1",
-                }
-            ]
-        )
-        transcripts = pd.DataFrame({"name": [], "chr": [], "exons": [], "strand": []})
-        genome = MockGenome(genes, transcripts, {"1": 10000})
-        count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
-        interval_strategy = IntervalStrategyGene()
-
-        def inner():
-            count_strategy.count_reads(
-                interval_strategy,
-                genome,
-                bam.filename.decode("utf-8"),
-                bam.filename.decode("utf-8") + ".bai",
-            )
-
-        try:
-            inner
-        except ValueError:
-            self.fail("One too many was detected when it shouldn't have been possible")
-
-    def one_too_many_raises_nh_larger_than_1(self):
-
-        bam = MockBamFixed(
-            [
-                # guess the second one newer shows up
-                {
-                    "strand": 1,
-                    "regions": [(1010, 1020)],
-                    "tags": {"NH": 2},
-                    "qname": "read0",
-                },
-                # guess the second one newer shows up
-                {
-                    "strand": 1,
-                    "regions": [(1010, 1020)],
-                    "tags": {"NH": 2},
-                    "qname": "read0",
-                },
-                # guess the second one newer shows up
-                {
-                    "strand": 1,
-                    "regions": [(1010, 1020)],
-                    "tags": {"NH": 2},
-                    "qname": "read0",
-                },
-            ]
-        )
-        genes = pd.DataFrame(
-            [
-                {
-                    "gene_stable_id": "FakeB",
-                    "name": "B",
-                    "tss": 1000,
-                    "tes": 1200,
-                    "chr": "1",
-                }
-            ]
-        )
-        transcripts = pd.DataFrame({"name": [], "chr": [], "exons": [], "strand": []})
-        genome = MockGenome(genes, transcripts, {"1": 10000})
-        count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
-        interval_strategy = IntervalStrategyGene()
-
-        def inner():
-            count_strategy.count_reads(
-                interval_strategy,
-                genome,
-                bam.filename.decode("utf-8"),
-                bam.filename.decode("utf-8") + ".bai",
-            )
-
-        with pytest.raises(ValueError):
-            inner()
-
-    def test_read_mapped_twice_different_genes_with_tag(self):
-        # handles c
-
-        bam = MockBamFixed(
-            [
-                {
-                    "strand": 1,
-                    "regions": [(10, 20)],
-                    "tags": {"NH": 2},
-                    "qname": "read0",
-                },
-                # same read, just a different alignment
-                {
-                    "strand": 1,
-                    "regions": [(1010, 1020)],
-                    "tags": {"NH": 2},
-                    "qname": "read0",
-                },
-            ]
-        )
-        genes = pd.DataFrame(
-            [
-                {
-                    "gene_stable_id": "FakeA",
-                    "name": "A",
-                    "tss": 15,
-                    "tes": 300,
-                    "chr": "1",
-                },
-                {
-                    "gene_stable_id": "FakeB",
-                    "name": "B",
-                    "tss": 1000,
-                    "tes": 1200,
-                    "chr": "1",
-                },
-            ]
-        )
-        transcripts = pd.DataFrame({"name": [], "chr": [], "exons": [], "strand": []})
-        genome = MockGenome(genes, transcripts, {"1": 10000})
-        count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
-        interval_strategy = IntervalStrategyGene()
-        lookup = count_strategy.count_reads(
-            interval_strategy,
-            genome,
-            bam.filename.decode("utf-8"),
-            bam.filename.decode("utf-8") + ".bai",
-        )
-        assert lookup["FakeA"] == 0.5  #
-        assert lookup["FakeB"] == 0.5
-
-    def test_read_mapped_twice_to_the_same_gene(self):
-        # handles c
-
-        bam = MockBamFixed(
-            [
-                {
-                    "strand": 1,
-                    "regions": [(10, 20)],
-                    "tags": {"NH": 2},
-                    "qname": "read0",
-                },
-                # same read, just a different alignment, same gene!
-                {
-                    "strand": 1,
-                    "regions": [(30, 40)],
-                    "tags": {"NH": 2},
-                    "qname": "read0",
-                },
-            ]
-        )
-        genes = pd.DataFrame(
-            [
-                {
-                    "gene_stable_id": "FakeA",
-                    "name": "A",
-                    "tss": 15,
-                    "tes": 300,
-                    "chr": "1",
-                },
-                {
-                    "gene_stable_id": "FakeB",
-                    "name": "B",
-                    "tss": 1000,
-                    "tes": 1200,
-                    "chr": "1",
-                },
-            ]
-        )
-        transcripts = pd.DataFrame({"name": [], "chr": [], "exons": [], "strand": []})
-        genome = MockGenome(genes, transcripts, {"1": 10000})
-        count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
-        interval_strategy = IntervalStrategyGene()
-        lookup = count_strategy.count_reads(
-            interval_strategy,
-            genome,
-            bam.filename.decode("utf-8"),
-            bam.filename.decode("utf-8") + ".bai",
-        )
-        # how am I ever going to achieve this?
-        assert lookup["FakeA"] == 1
-        assert lookup["FakeB"] == 0
-
-    def test_read_mapped_twice_once_outside(self):
-        # handles c
-
-        bam = MockBamFixed(
-            [
-                {
-                    "strand": 1,
-                    "regions": [(10, 20)],
-                    "tags": {"NH": 2},
-                    "qname": "read0",
-                },
-                {
-                    "strand": 1,
-                    "regions": [(5000, 5010)],
-                    "tags": {"NH": 2},
-                    "qname": "read0",
-                },  # not in a gene!
-            ]
-        )
-        genes = pd.DataFrame(
-            [
-                {
-                    "gene_stable_id": "FakeA",
-                    "name": "A",
-                    "tss": 15,
-                    "tes": 300,
-                    "chr": "1",
-                },
-                {
-                    "gene_stable_id": "FakeB",
-                    "name": "B",
-                    "tss": 1000,
-                    "tes": 1200,
-                    "chr": "1",
-                },
-            ]
-        )
-        transcripts = pd.DataFrame({"name": [], "chr": [], "exons": [], "strand": []})
-        genome = MockGenome(genes, transcripts, {"1": 10000})
-        count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
-        interval_strategy = IntervalStrategyGene()
-        lookup = count_strategy.count_reads(
-            interval_strategy,
-            genome,
-            bam.filename.decode("utf-8"),
-            bam.filename.decode("utf-8") + ".bai",
-        )
-        assert lookup["FakeA"] == 1
-        assert lookup["FakeB"] == 0
-
-    def test_read_mapped_twice_to_the_same_gene_once_to_another(self):
-
-        bam = MockBamFixed(
-            [
-                # repeated maps to the same gene count as one!
-                {
-                    "strand": 1,
-                    "regions": [(10, 20)],
-                    "tags": {"NH": 3},
-                    "qname": "read0",
-                },
-                {
-                    "strand": 1,
-                    "regions": [(30, 40)],
-                    "tags": {"NH": 3},
-                    "qname": "read0",
-                },
-                {
-                    "strand": 1,
-                    "regions": [(1000, 1010)],
-                    "tags": {"NH": 3},
-                    "qname": "read0",
-                },
-            ]
-        )
-        genes = pd.DataFrame(
-            [
-                {
-                    "gene_stable_id": "FakeA",
-                    "name": "A",
-                    "tss": 15,
-                    "tes": 300,
-                    "chr": "1",
-                },
-                {
-                    "gene_stable_id": "FakeB",
-                    "name": "B",
-                    "tss": 1000,
-                    "tes": 1200,
-                    "chr": "1",
-                },
-            ]
-        )
-        transcripts = pd.DataFrame({"name": [], "chr": [], "exons": [], "strand": []})
-        genome = MockGenome(genes, transcripts, {"1": 10000})
-        count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
-        interval_strategy = IntervalStrategyGene()
-        lookup = count_strategy.count_reads(
-            interval_strategy,
-            genome,
-            bam.filename.decode("utf-8"),
-            bam.filename.decode("utf-8") + ".bai",
-        )
-        assert lookup["FakeA"] == 0.5
-        assert lookup["FakeB"] == 0.5
-
-    def test_read_mapped_thrice(self):
-
-        bam = MockBamFixed(
-            [
-                {
-                    "strand": 1,
-                    "regions": [(10, 20)],
-                    "tags": {"NH": 3},
-                    "qname": "read0",
-                },
-                {
-                    "strand": 1,
-                    "regions": [(1000, 1010)],
-                    "tags": {"NH": 3},
-                    "qname": "read0",
-                },
-                {
-                    "strand": 1,
-                    "regions": [(2000, 2040)],
-                    "tags": {"NH": 3},
-                    "qname": "read0",
-                },
-            ]
-        )
-        genes = pd.DataFrame(
-            [
-                {
-                    "gene_stable_id": "FakeA",
-                    "name": "A",
-                    "tss": 15,
-                    "tes": 300,
-                    "chr": "1",
-                },
-                {
-                    "gene_stable_id": "FakeB",
-                    "name": "B",
-                    "tss": 1000,
-                    "tes": 1200,
-                    "chr": "1",
-                },
-                {
-                    "gene_stable_id": "FakeC",
-                    "name": "C",
-                    "tss": 2000,
-                    "tes": 2020,
-                    "chr": "1",
-                },
-            ]
-        )
-        transcripts = pd.DataFrame({"name": [], "chr": [], "exons": [], "strand": []})
-        genome = MockGenome(genes, transcripts, {"1": 10000})
-        count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
-        interval_strategy = IntervalStrategyGene()
-        lookup = count_strategy.count_reads(
-            interval_strategy,
-            genome,
-            bam.filename.decode("utf-8"),
-            bam.filename.decode("utf-8") + ".bai",
-        )
-        assert lookup["FakeA"] == 1 / 3.0
-        assert lookup["FakeB"] == 1 / 3.0
-        assert lookup["FakeC"] == 1 / 3.0
-
-    def test_two_genes_one_read(self):
-
-        bam = MockBamFixed(
-            [{"strand": 1, "regions": [(10, 20)], "tags": {"NH": 1}, "qname": "read0"}]
-        )
-        genes = pd.DataFrame(
-            [
-                {
-                    "gene_stable_id": "FakeA",
-                    "name": "A",
-                    "tss": 15,
-                    "tes": 300,
-                    "chr": "1",
-                },
-                {
-                    "gene_stable_id": "FakeB",
-                    "name": "B",
-                    "tss": 15,
-                    "tes": 1200,
-                    "chr": "1",
-                },
-            ]
-        )
-        transcripts = pd.DataFrame({"name": [], "chr": [], "exons": [], "strand": []})
-        genome = MockGenome(genes, transcripts, {"1": 10000})
-        count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
-        interval_strategy = IntervalStrategyGene()
-        lookup = count_strategy.count_reads(
-            interval_strategy,
-            genome,
-            bam.filename.decode("utf-8"),
-            bam.filename.decode("utf-8") + ".bai",
-        )
-        assert lookup["FakeA"] == 0.5
-        assert lookup["FakeB"] == 0.5
-
-    def test_two_genes_one_read_mapped_multitimes(self):
-
-        bam = MockBamFixed(
-            [
-                {
-                    "strand": 1,
-                    "regions": [(10, 20)],
-                    "tags": {"NH": 3},
-                    "qname": "read0",
-                },
-                {
-                    "strand": 1,
-                    "regions": [(30, 40)],
-                    "tags": {"NH": 3},
-                    "qname": "read0",
-                },
-                {
-                    "strand": 1,
-                    "regions": [(310, 320)],
-                    "tags": {"NH": 3},
-                    "qname": "read0",
-                },
-            ]
-        )
-        genes = pd.DataFrame(
-            [
-                {
-                    "gene_stable_id": "FakeA",
-                    "name": "A",
-                    "tss": 15,
-                    "tes": 300,
-                    "chr": "1",
-                },
-                {
-                    "gene_stable_id": "FakeB",
-                    "name": "B",
-                    "tss": 15,
-                    "tes": 1200,
-                    "chr": "1",
-                },
-            ]
-        )
-        transcripts = pd.DataFrame({"name": [], "chr": [], "exons": [], "strand": []})
-        genome = MockGenome(genes, transcripts, {"1": 10000})
-        count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
-        interval_strategy = IntervalStrategyGene()
-        lookup = count_strategy.count_reads(
-            interval_strategy,
-            genome,
-            bam.filename.decode("utf-8"),
-            bam.filename.decode("utf-8") + ".bai",
-        )
-        assert lookup["FakeA"] == 0.5
-        assert lookup["FakeB"] == 0.5
-
-    def test_two_genes_one_read_mapped_multitimes2(self):
-
-        bam = MockBamFixed(
-            [
-                {
-                    "strand": 1,
-                    "regions": [(10, 20)],
-                    "tags": {"NH": 4},
-                    "qname": "read0",
-                },  # FakeA + FakeB
-                {
-                    "strand": 1,
-                    "regions": [(30, 40)],
-                    "tags": {"NH": 4},
-                    "qname": "read0",
-                },  # FakeA + FakeB
-                {
-                    "strand": 1,
-                    "regions": [(310, 320)],
-                    "tags": {"NH": 4},
-                    "qname": "read0",
-                },  # Fake B
-                {
-                    "strand": 1,
-                    "regions": [(315, 320)],
-                    "tags": {"NH": 4},
-                    "qname": "read0",
-                },  # Fake B
-                # different read...
-                {
-                    "strand": 1,
-                    "regions": [(315, 320)],
-                    "tags": {"NH": 1},
-                    "qname": "read1",
-                },
-            ]
-        )
-        genes = pd.DataFrame(
-            [
-                {
-                    "gene_stable_id": "FakeA",
-                    "name": "A",
-                    "tss": 15,
-                    "tes": 300,
-                    "chr": "1",
-                },
-                {
-                    "gene_stable_id": "FakeB",
-                    "name": "B",
-                    "tss": 15,
-                    "tes": 1200,
-                    "chr": "1",
-                },
-            ]
-        )
-        transcripts = pd.DataFrame({"name": [], "chr": [], "exons": [], "strand": []})
-        genome = MockGenome(genes, transcripts, {"1": 10000})
-        count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
-        interval_strategy = IntervalStrategyGene()
-        lookup = count_strategy.count_reads(
-            interval_strategy,
-            genome,
-            bam.filename.decode("utf-8"),
-            bam.filename.decode("utf-8") + ".bai",
-        )
-        assert lookup["FakeA"] == 0.5  #
-        assert lookup["FakeB"] == 0.5 + 1
-
-    def test_reads_reverse(self):
-
-        bam = MockBamFixed(
-            [
-                {
-                    "strand": 1,
-                    "regions": [(10, 20)],
-                    "tags": {"NH": 2},
-                    "qname": "read0",
-                },  # FakeA + FakeB
-                # FakeA + FakeB
-                {
-                    "strand": -1,
-                    "regions": [(500, 505), (1150, 1155)],
-                    "tags": {"NH": 2},
-                    "qname": "read0",
-                },
-                # different read...
-                {
-                    "strand": -1,
-                    "regions": [(1000, 1010)],
-                    "tags": {"NH": 1},
-                    "qname": "read1",
-                },
-            ]
-        )
-        genes = pd.DataFrame(
-            [
-                {
-                    "gene_stable_id": "FakeA",
-                    "name": "A",
-                    "tss": 15,
-                    "tes": 300,
-                    "chr": "1",
-                },
-                {
-                    "gene_stable_id": "FakeB",
-                    "name": "B",
-                    "tss": 1200,
-                    "tes": 1000,
-                    "chr": "1",
-                },
-            ]
-        )
-        transcripts = pd.DataFrame({"name": [], "chr": [], "exons": [], "strand": []})
-        genome = MockGenome(genes, transcripts, {"1": 10000})
-        count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
-        interval_strategy = IntervalStrategyGene()
-        lookup = count_strategy.count_reads(
-            interval_strategy,
-            genome,
-            bam.filename.decode("utf-8"),
-            bam.filename.decode("utf-8") + ".bai",
-        )
-        assert lookup["FakeA"] == 0.5  #
-        assert lookup["FakeB"] == 0.5 + 1
-
-    def test_first_read_does_not_hit_a_gene(self):
-
-        bam = MockBamFixed(
-            [
-                # nothing...
-                {"strand": 1, "regions": [(0, 1)], "tags": {"NH": 1}, "qname": "read1"},
-                {
-                    "strand": 1,
-                    "regions": [(10, 20)],
-                    "tags": {"NH": 2},
-                    "qname": "read0",
-                },  # FakeA + FakeB
-                # FakeA + FakeB
-                {
-                    "strand": -1,
-                    "regions": [(500, 505), (1150, 1155)],
-                    "tags": {"NH": 2},
-                    "qname": "read0",
-                },
-                # different read...
-                {
-                    "strand": -1,
-                    "regions": [(1000, 1010)],
-                    "tags": {"NH": 1},
-                    "qname": "read1",
-                },
-            ]
-        )
-        genes = pd.DataFrame(
-            [
-                {
-                    "gene_stable_id": "FakeA",
-                    "name": "A",
-                    "tss": 15,
-                    "tes": 300,
-                    "chr": "1",
-                },
-                {
-                    "gene_stable_id": "FakeB",
-                    "name": "B",
-                    "tss": 1200,
-                    "tes": 1000,
-                    "chr": "1",
-                },
-            ]
-        )
-        transcripts = pd.DataFrame({"name": [], "chr": [], "exons": [], "strand": []})
-        genome = MockGenome(genes, transcripts, {"1": 10000})
-        count_strategy = anno_tag_counts.CounterStrategyWeightedStranded()
-        interval_strategy = IntervalStrategyGene()
-        lookup = count_strategy.count_reads(
-            interval_strategy,
-            genome,
-            bam.filename.decode("utf-8"),
-            bam.filename.decode("utf-8") + ".bai",
-        )
-        assert lookup["FakeA"] == 0.5  #
-        assert lookup["FakeB"] == 0.5 + 1
-
-    def test_intron_strategy(self):
-        iv = anno_tag_counts.IntervalStrategyIntron()
-        genes = pd.DataFrame(
-            [
-                {
-                    "gene_stable_id": "FakeA",
-                    "biotype": "non_coding",
                     "name": "A",
                     "tss": 0,
                     "tes": 2000,
                     "chr": "1",
+                    "biotype": "protein_coding",
                     "strand": 1,
                 },
                 {
                     "gene_stable_id": "FakeB",
-                    "biotype": "protein_coding",
                     "name": "B",
                     "tss": 4000,
                     "tes": 2000,
                     "chr": "1",
+                    "biotype": "misc_RNA",
                     "strand": -1,
                 },
             ]
@@ -2135,14 +1278,18 @@ class TestWeigthedCounts:
             ]
         )
         genome = MockGenome(genes, transcripts, {"1": 10000})
-        actual = iv._get_interval_tuples_by_chr(genome)
-        assert list(actual.keys()) == list("1")
-        assert len(actual["1"]) == 2
-        assert actual["1"][0][0] == "FakeA"
-        assert actual["1"][0][1] == 1
-        assert actual["1"][0][2] == [0, 600]
-        assert actual["1"][0][3] == [500, 2000]
-        # assert (actual['1'][1] == ('FakeB', -1, [[3000,], [3900]])).all()
+        i = IntervalStrategyIntron()
+        actual = i._get_interval_tuples_by_chr(genome)
+        assert '1' in actual
+        assert len(actual['1']) == 2
+        assert len(actual['1'][0][2]) == 2
+
+
+
+class TestFPKM:
+    def test_fpkm_raises(self):
+        with pytest.raises(NotImplementedError):
+            anno_tag_counts.NormalizationFPKM(55)
 
 
 @pytest.mark.usefixtures("new_pipegraph")
@@ -2188,13 +1335,10 @@ class TestPPG:
             j = g.anno_jobs[anno.get_cache_name()]
             assert j.cores_needed == -1
 
-    def test_qc(self, new_pipegraph):
-        import logging
-        new_pipegraph.new_pipegraph(quiet=False, log_file="logs/debug.log", log_level=logging.DEBUG)
-        import pypipegraph as ppg
-        ppg.util.global_pipegraph.quiet = False
+    def test_qc_distribution(self, new_pipegraph):
         from mbf_sampledata import get_human_22_fake_genome, get_sample_data
         import mbf_align
+
         genome = get_human_22_fake_genome()
         with no_qc():
             lane = mbf_align.AlignedSample(
@@ -2206,11 +1350,36 @@ class TestPPG:
             )  # index creation is automatic
         genes = Genes(genome)
         anno = anno_tag_counts.GeneStranded(lane)
-        normalized = anno_tag_counts.NormalizationTPM(anno)
         genes += anno
-        genes += normalized
+        genes += anno_tag_counts.NormalizationTPM(anno)
+        genes += anno_tag_counts.NormalizationCPM(anno)
+        qc_jobs = do_qc(lambda x: "read_distribution" in str(x))
+        run_pipegraph()
+        assert len(qc_jobs) == 3
+        cpm_job = [x for x in qc_jobs if "CPM" in x.filenames[0]][0]
+        tpm_job = [x for x in qc_jobs if "TPM" in x.filenames[0]][0]
+        raw_job = [
+            x
+            for x in qc_jobs
+            if not "TPM" in x.filenames[0] and not "CPM" in x.filenames[0]
+        ][0]
+        assert_image_equal(raw_job.filenames[0])
+        assert_image_equal(tpm_job.filenames[0], "_tpm")
+        assert_image_equal(cpm_job.filenames[0], "_cpm")
+
+    def test_qc_pca(self):
+        import mbf_sampledata
+
+        ddf, a, b = mbf_sampledata.get_pasilla_data_subset()
+        annos = []
+        for x in a + b:
+            anno = anno_tag_counts.NormalizationCPM(x)
+            with no_qc():
+                ddf += anno
+            annos.append(anno)
+        for anno in annos:
+            anno.register_qc_pca(ddf)
         qc_jobs = do_qc()
         run_pipegraph()
-        assert len(qc_jobs) == 2
+        assert len(qc_jobs) == 1
         assert_image_equal(qc_jobs[0].filenames[0])
-        assert_image_equal(qc_jobs[1].filenames[0], '_tpm')
