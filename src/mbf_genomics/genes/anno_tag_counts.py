@@ -221,14 +221,22 @@ class TagCountCommonQC:
             def plot():
                 df = genes.df
                 import sklearn.decomposition as decom
-
-                pca = decom.PCA(n_components=2, whiten=False)
-                data = genes.df[[x.columns[0] for x in elements]]
-                data -= data.min()  # min max scaling 0..1
-                data /= data.max()
-                data = data[~pd.isnull(data).any(axis=1)]  # can' do pca on NAN values
-                pca.fit(data.T)
-                xy = pca.transform(data.T)
+                if len(elements) == 1:
+                    xy = np.array([[0],[0]]).transpose()
+                    title = "PCA %s - fake / single sample" % genes.name
+                else:
+                    pca = decom.PCA(n_components=2, whiten=False)
+                    data = genes.df[[x.columns[0] for x in elements]]
+                    data -= data.min()  # min max scaling 0..1
+                    data /= data.max()
+                    data = data[~pd.isnull(data).any(axis=1)]  # can' do pca on NAN values
+                    pca.fit(data.T)
+                    xy = pca.transform(data.T)
+                    title = "PCA %s\nExplained variance: x %.2f%%, y %.2f%%" % (
+                            genes.name,
+                            pca.explained_variance_ratio_[0] * 100,
+                            pca.explained_variance_ratio_[1] * 100,
+                        )
                 plot_df = pd.DataFrame(
                     {
                         "x": xy[:, 0],
@@ -252,12 +260,8 @@ class TagCountCommonQC:
                     )
                     .scale_color_many_categories()
                     .title(
-                        "PCA %s\nExplained variance: x %.2f%%, y %.2f%%"
-                        % (
-                            genes.name,
-                            pca.explained_variance_ratio_[0] * 100,
-                            pca.explained_variance_ratio_[1] * 100,
-                        )
+                        title
+                       
                     )
                     .render(output_filename, width=8, height=6)
                 )

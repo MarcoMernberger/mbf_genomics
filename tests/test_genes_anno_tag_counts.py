@@ -1383,3 +1383,21 @@ class TestPPG:
         run_pipegraph()
         assert len(qc_jobs) == 1
         assert_image_equal(qc_jobs[0].filenames[0])
+
+    def test_qc_pca_single_sample(self):
+        import mbf_sampledata
+
+        ddf, a, b = mbf_sampledata.get_pasilla_data_subset()
+        annos = []
+        for x in a + b:
+            anno = anno_tag_counts.NormalizationCPM(x)
+            with no_qc():
+                ddf += anno
+            annos.append(anno)
+            break
+        for anno in annos:
+            anno.register_qc_pca(ddf)
+        qc_jobs = do_qc()
+        run_pipegraph()
+        assert len(qc_jobs) == 1
+        assert_image_equal(qc_jobs[0].filenames[0])
