@@ -154,7 +154,7 @@ class GenomicRegions(DelayedDataFrame):
 
         super().__init__(name, self._load, dependencies, result_dir)
         if self.load_strategy.build_deps:
-            dependencies = self.load_strategy.deps
+            dependencies = []
             if isinstance(on_overlap, tuple):
                 dependencies.append(
                     ppg.ParameterInvariant("grload_params" + name, ("function",))
@@ -170,6 +170,7 @@ class GenomicRegions(DelayedDataFrame):
             dependencies.append(
                 ppg.FunctionInvariant("grload_func" + name, self.gr_loading_function)
             )
+            self.load_strategy.load().depends_on(dependencies)
 
         if not hasattr(self, "column_properties"):
             self.column_properties = {

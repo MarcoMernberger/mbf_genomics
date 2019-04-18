@@ -126,27 +126,23 @@ class Genes(GenomicRegions):
                     "description": "A short description of the gene",
                 },
             }
-            if dependencies:
-                deps = dependencies
-            elif self.load_strategy.build_deps:
-                deps = [genome.download_genome()]
-                deps.append(ppg.FunctionInvariant(self.name + "_load", load_func))
-                deps.append(genome.job_genes())
-                deps.append(genome.job_transcripts())
-            else:
-                deps = []
             GenomicRegions.__init__(
                 self,
                 name,
                 self._load,
-                deps,
+                dependencies if dependencies is not None else [],
                 genome,
                 on_overlap="ignore",
                 result_dir=result_dir,
                 sheet_name=sheet_name,
                 summit_annotator=False,
             )
-            
+            if self.load_strategy.build_deps:
+                deps = [genome.download_genome()]
+                # function invariant for _load is done by GR.__init__
+                deps.append(genome.job_genes())
+                deps.append(genome.job_transcripts())
+                self.load_strategy.load().depends_on(deps)
             self._already_inited = True
             self.vid = vid
 
