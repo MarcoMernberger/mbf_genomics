@@ -1001,3 +1001,35 @@ class Test_DelayedDataFramePPG:
         a.write()
         ppg.run_pipegraph()
         assert (a.df["C"] == "hello").all()
+
+
+    def test_nested_anno_dependencies(self):
+        class Nested(Annotator):
+            columns = ["b"]
+
+            def calc(self, df):
+                return pd.Series([10] * len(df))
+
+            def dep_annos(self):
+                return [Constant('Nestedconst', 5)]
+        class Nesting(Annotator):
+            columns = ["a"]
+
+            def calc(self, df):
+                return pd.Series([15] * len(df))
+
+            def dep_annos(self):
+                return [Constant('Nestingconst', 5), Nested()]
+        anno = Nesting()
+        a = DelayedDataFrame(
+            "shu", lambda: pd.DataFrame({"A": [1, 2, 3], "B": ["a", "b", "c"]})
+        )
+        a += anno
+        a.write()
+        ppg.run_pipegraph()
+        assert (a.df["a"] == 15).all()
+        assert (a.df["b"] == 10).all()
+        assert (a.df["Nestedconst"] == 5).all()
+        assert (a.df["Nestingconst"] == 5).all()
+
+

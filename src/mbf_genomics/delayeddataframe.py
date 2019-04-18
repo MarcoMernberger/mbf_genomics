@@ -23,7 +23,7 @@ class DelayedDataFrame(object):
     """
 
     def __init__(self, name, loading_function, dependencies=[], result_dir=None):
-        #assert_uniqueness_of_object is taking core of by the load_strategy
+        # assert_uniqueness_of_object is taking core of by the load_strategy
         self.name = name
         if result_dir:
             self.result_dir = Path(result_dir)
@@ -418,14 +418,20 @@ class Load_PPG:
             return
         self.tree_fixed = True
 
+        def recursivly_add_annos(deps, a):
+            new = a.dep_annos()
+            if None in new:  # pragma: no cover
+                raise ValueError("None returned in %s.dep_annos" % a)
+            for n in new:
+                if n not in deps:
+                    recursivly_add_annos(deps, n)
+                    deps.add(n)
+
         def descend_and_add_annos(node):
             annos_here = set(node.ddf.annotators.values())
             deps = set()
             for a in annos_here:
-                new = a.dep_annos()
-                if None in new: # pragma: no cover
-                    raise ValueError("None returned in %s.dep_annos" % a)
-                deps.update(new)
+                recursivly_add_annos(deps, a)
             annos_here.update(deps)
             for anno in annos_here:
                 node.add_annotator(anno)

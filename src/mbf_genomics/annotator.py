@@ -19,9 +19,9 @@ class Annotator(ABC):
             singleton_dict[cn] = {}
         key = {}
         for ii in range(0, len(args)):
-            key['arg_%i' % ii] = args[ii]
+            key["arg_%i" % ii] = args[ii]
         key.update(kwargs)
-        for k,v in key.items():
+        for k, v in key.items():
             key[k] = freeze(v)
         key = tuple(sorted(key.items()))
         if not key in singleton_dict[cn]:
@@ -30,6 +30,12 @@ class Annotator(ABC):
 
     def __hash__(self):
         return hash(self.get_cache_name())
+
+    def __str__(self):
+        return "Annotator %s" % self.columns[0]
+
+    def __repr__(self):
+        return "Annotator(%s)" % self.columns[0]
 
     def get_cache_name(self):
         if hasattr(self, "cache_name"):
@@ -56,4 +62,3 @@ class Constant(Annotator):
 
     def calc(self, df):
         return pd.DataFrame({self.columns[0]: self.value}, index=df.index)
-

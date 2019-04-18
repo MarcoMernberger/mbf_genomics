@@ -284,7 +284,7 @@ class _FastTagCounter(Annotator, TagCountCommonQC):
         self.count_strategy = count_strategy
         self.interval_strategy = interval_strategy
         self.columns = [(column_name % (self.aligned_lane.name,)).strip()]
-        self.cache_name = hashlib.md5(self.columns[0].encode("utf-8")).hexdigest()
+        self.cache_name = 'FastTagCounter_' + hashlib.md5(self.columns[0].encode("utf-8")).hexdigest()
         self.column_properties = {self.columns[0]: {"description": column_desc}}
         self.vid = aligned_lane.vid
         self.cores_needed = count_strategy.cores_needed
@@ -422,7 +422,7 @@ class _NormalizationAnno(Annotator, TagCountCommonQC):
             self.vid = None
             self.aligned_lane = None
         self.columns = [self.raw_column + " " + self.name]
-        self.cache_name = hashlib.md5(self.columns[0].encode("utf-8")).hexdigest()
+        self.cache_name = self.__class__.__name__ + '_' + hashlib.md5(self.columns[0].encode("utf-8")).hexdigest()
         if self.raw_anno is not None:
             self.plot_name = self.raw_anno.plot_name
             self.qc_folder = f"normalized_{self.name}_{self.raw_anno.count_strategy.name}_{self.raw_anno.interval_strategy.name}"
