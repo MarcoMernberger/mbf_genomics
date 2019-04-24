@@ -18,6 +18,7 @@ from mbf_qualitycontrol.testing.fixtures import (  # noqa:F401
     new_pipegraph_no_qc,
     both_ppg_and_no_ppg_no_qc,
 )
+from mbf_genomics.testing.fixtures import clear_annotators  # noqa:F401
 
 # from mbf_externals.testing.fixtures import local_store, global_store  # noqa:F401
 root = Path(__file__).parent.parent
@@ -31,15 +32,6 @@ from plotnine.tests.conftest import (  # noqa:F401
 
 _setup()
 
-
-@pytest.fixture
-def clear_annotators(request):
-    """Clear the annotator singleton instance cache
-    which is only used if no ppg is in play"""
-    import mbf_genomics.annotator
-
-    mbf_genomics.annotator.annotator_singletons.clear()
-    mbf_genomics.annotator.annotator_singletons['lookup'] = []
 
 
 def pytest_generate_tests(metafunc):
