@@ -3,15 +3,15 @@ import pandas as pd
 import pypipegraph as ppg
 from .util import freeze
 
-annotator_singletons = {}
+annotator_singletons = {'lookup': []}
 
 
 class Annotator(ABC):
     def __new__(cls, *args, **kwargs):
         cn = cls.__name__
-        if ppg.util.global_pipegraph:
+        if ppg.inside_ppg():
             if not hasattr(ppg.util.global_pipegraph, "_annotator_singleton_dict"):
-                ppg.util.global_pipegraph._annotator_singleton_dict = {}
+                ppg.util.global_pipegraph._annotator_singleton_dict = {'lookup': []}
             singleton_dict = ppg.util.global_pipegraph._annotator_singleton_dict
         else:
             singleton_dict = annotator_singletons
@@ -26,6 +26,8 @@ class Annotator(ABC):
         key = tuple(sorted(key.items()))
         if not key in singleton_dict[cn]:
             singleton_dict[cn][key] = object.__new__(cls)
+            singleton_dict["lookup"].append(singleton_dict[cn][key])
+
         return singleton_dict[cn][key]
 
     def __hash__(self):

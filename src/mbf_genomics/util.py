@@ -56,6 +56,7 @@ def parse_a_or_c_to_column(k):
             an (annotator, int(i)) tuple -> annotator.columns[i]
     """
     from mbf_genomics.annotator import Annotator
+
     if isinstance(k, str):
         return k
     elif isinstance(k, Annotator):
@@ -82,6 +83,7 @@ def parse_a_or_c_to_anno(k):
             an (annotator, int(i)) tuple -> annotator.columns[i]
     """
     from mbf_genomics.annotator import Annotator
+
     if isinstance(k, str):
         return None
     elif isinstance(k, Annotator):
@@ -106,6 +108,7 @@ def parse_a_or_c_to_plot_name(k):
 
     """
     from mbf_genomics.annotator import Annotator
+
     if isinstance(k, str):
         return k
     elif isinstance(k, Annotator):
@@ -121,3 +124,24 @@ def parse_a_or_c_to_plot_name(k):
             return getattr(k[0], "plot_name", k[1])
     else:
         raise ValueError("parse_a_or_c_to_column could not parse %s" % (k,))
+
+
+def find_annos_from_column(k):
+    from . import annotator
+    import pypipegraph as ppg
+
+    if ppg.inside_ppg():
+        if not hasattr(ppg.util.global_pipegraph, "_annotator_singleton_dict"):
+            ppg.util.global_pipegraph._annotator_singleton_dict = {}
+        singleton_dict = ppg.util.global_pipegraph._annotator_singleton_dict
+    else:
+        singleton_dict = annotator.annotator_singletons
+
+    res = []
+    for anno in singleton_dict['lookup']:
+        if k in anno.columns:
+            res.append(anno)
+    if res:
+        return res
+    else:
+        raise KeyError("No anno for column '%s' found" % (k,))
