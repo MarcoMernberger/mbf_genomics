@@ -9,7 +9,7 @@ from mbf_genomics.util import (
     parse_a_or_c_to_column,
     parse_a_or_c_to_anno,
     parse_a_or_c_to_plot_name,
-    find_annos_from_column
+    find_annos_from_column,
 )
 
 
@@ -56,7 +56,7 @@ class PolyConstant(Annotator):
         )
 
 
-class TestAnnottorParsing:
+class TestAnnotatorParsing:
     def test_to_column(self):
         assert parse_a_or_c_to_column("hello") == "hello"
         assert parse_a_or_c_to_column(Constant("shu", 5)) == "shu"
@@ -139,20 +139,17 @@ class TestAnnottorParsing:
             == "hello"
         )
 
-    def test_find_annos_from_column(self, both_ppg_and_no_ppg_no_qc):
-        a = Constant('shu', 5)
-        assert find_annos_from_column('shu') == [a]
-        assert find_annos_from_column('shu')[0] is a
+    def test_find_annos_from_column(self, both_ppg_and_no_ppg_no_qc, clear_annotators):
+        a = Constant("shu", 5)
+        assert find_annos_from_column("shu") == [a]
+        assert find_annos_from_column("shu")[0] is a
         with pytest.raises(KeyError):
-            find_annos_from_column('nosuchcolumn')
+            find_annos_from_column("nosuchcolumn")
 
-        b = PolyConstant(['shu',], [10])
-        assert find_annos_from_column('shu') == [a,b]
+        b = PolyConstant(["shu"], [10])
+        assert find_annos_from_column("shu") == [a, b]
 
         if ppg.inside_ppg():
             both_ppg_and_no_ppg_no_qc.new_pipegraph()
             with pytest.raises(KeyError):
-                find_annos_from_column('shu')
-
-
-
+                find_annos_from_column("shu")

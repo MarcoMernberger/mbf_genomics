@@ -39,6 +39,7 @@ def clear_annotators(request):
     import mbf_genomics.annotator
 
     mbf_genomics.annotator.annotator_singletons.clear()
+    mbf_genomics.annotator.annotator_singletons['lookup'] = []
 
 
 def pytest_generate_tests(metafunc):

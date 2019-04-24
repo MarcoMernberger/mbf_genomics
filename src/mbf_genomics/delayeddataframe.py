@@ -1,9 +1,15 @@
 from pathlib import Path
 import pandas as pd
+import numpy as np
 import pypipegraph as ppg
 
 from .annotator import Annotator
 from mbf_externals.util import lazy_method
+from mbf_genomics.util import (
+    parse_a_or_c_to_column,
+    parse_a_or_c_to_anno,
+    find_annos_from_column,
+)
 
 
 class DelayedDataFrame(object):
@@ -113,16 +119,31 @@ class DelayedDataFrame(object):
         return self.load_strategy.annotate()
 
     def filter(
-        self, new_name, df_filter_function, annotators=[], dependencies=None, **kwargs
+        self,
+        new_name,
+        df_filter_function,
+        annotators=[],
+        dependencies=None,
+        column_lookup=None,
+        **kwargs,
     ):
         """Filter an ddf to a new one called new_name.
 
         Paramaters
         -----------
-            df_filter_function: function
-              take a df, return a valid index
+            df_filter_function: function|list_of_filters
+              function: take a df, return a valid index
+              list_of_filters: see DelayedDataFrame.definition_to_function
+
+            annotators:
+                annotators used by your filter function.
+                Leave empty in the case of list_of_filters
+
             dependencies:
                 list of ppg.Jobs
+
+            column_lookup: offer abbreviations to the column definitions in list_of_filters
+
         """
 
         def load():
@@ -139,8 +160,15 @@ class DelayedDataFrame(object):
             dependencies = []
         elif not isinstance(dependencies, list):  # pragma: no cover
             dependencies = list(dependencies)
-        if isinstance(annotators, Annotator):
-            annotators = [annotators]
+        if isinstance(df_filter_function, (list, tuple)):
+            if isinstance(df_filter_function, (tuple)):
+                df_filter_function = [df_filter_function]
+            df_filter_function, annotators = self.definition_to_function(
+                df_filter_function, column_lookup if column_lookup is not None else {}
+            )
+        else:
+            if isinstance(annotators, Annotator):
+                annotators = [annotators]
         if self.load_strategy.build_deps:
             dependencies.append(
                 ppg.ParameterInvariant(
@@ -171,6 +199,149 @@ class DelayedDataFrame(object):
 
         self.children.append(result)
         return result
+
+    def definition_to_function(self, definition, column_lookup):  # noqa: C901
+        """
+        Create a filter function from a tuple of
+        (column_definition, operator, threshold)
+
+        Operators are strings '>', '<', '==', '>=', '<=',
+        They may be prefixed by '|' which means 'take absolute first'
+
+        Example:
+        genes.filter('2x', [
+            ('FDR', '<=', 0.05) # a name from column_lookup
+            ('log2FC', '|>', 1),  # absolute by prefixing operator
+            ...
+            (anno, '>=', 50),
+            ((anno, 1), '>=', 50),  # for the second column of the annotator
+            ((anno, 'columnX'), '>=', 50),  # for the second column of the annotator
+            ('annotator_columnX', '=>' 50), # search for an annotator with that column. Use if exactly one, complain otherwise
+
+
+        returns: a df_filter_func, [annotators]
+
+        """
+        functors = []
+        annotators = []
+        for column_name, op, threshold in definition:
+            if hasattr(self, "df") and column_name in self.df.columns:
+                # we can't check for non-annotator columns on filter
+                # definition in ppg ddfs that have not been loaded yet.
+                # oh well, no worse than passing in a function with an
+                # invalid column name
+                # exception in the 'we have a df and column is not in it is
+                # below
+                anno = None
+            else:
+                if column_name in column_lookup:
+                    column_name = column_lookup[column_name]
+                try:
+                    anno = parse_a_or_c_to_anno(column_name)
+                    column_name = parse_a_or_c_to_column(column_name)
+                except (ValueError, KeyError):
+                    anno = None
+                if anno is None:
+                    try:
+                        annos = find_annos_from_column(column_name)
+                    except KeyError:
+                        annos = []
+                    if len(annos) == 1:
+                        anno = annos[0]
+                    elif len(annos) > 1:
+                        raise KeyError(
+                            "Column (%s) was present in multiple annotators: %s.\n Pass in anno or (anno, column)"
+                            % (column_name, annos)
+                        )
+
+                if anno is None:
+                    if hasattr(self, "df"):
+                        if not column_name in self.df.columns:
+                            raise KeyError(
+                                f"unknown column {column_name}",
+                                "available",
+                                sorted(
+                                    set(list(self.df.columns) + list(column_lookup))
+                                ),
+                            )
+                    else:  # I guess, then the filter job fails later.
+                        pass
+            if op == "==":
+                f = (
+                    lambda df, column_name=column_name, threshold=threshold: df[
+                        column_name
+                    ]
+                    == threshold
+                )  # noqa: E03
+            elif op == ">":
+                f = (
+                    lambda df, column_name=column_name, threshold=threshold: df[
+                        column_name
+                    ]
+                    > threshold
+                )  # noqa: E03
+            elif op == "<":
+                f = (
+                    lambda df, column_name=column_name, threshold=threshold: df[
+                        column_name
+                    ]
+                    < threshold
+                )  # noqa: E03
+            elif op == ">=":
+                f = (
+                    lambda df, column_name=column_name, threshold=threshold: df[
+                        column_name
+                    ]
+                    >= threshold
+                )  # noqa: E03
+            elif op == "<=":
+                f = (
+                    lambda df, column_name=column_name, threshold=threshold: df[
+                        column_name
+                    ]
+                    <= threshold
+                )  # noqa: E03
+            elif op == "|>":
+                f = (
+                    lambda df, column_name=column_name, threshold=threshold: df[
+                        column_name
+                    ].abs()
+                    > threshold  # noqa: E03
+                )
+            elif op == "|<":
+                f = (
+                    lambda df, column_name=column_name, threshold=threshold: df[
+                        column_name
+                    ].abs()
+                    < threshold
+                )  # noqa: E03
+            elif op == "|>=":
+                f = (
+                    lambda df, column_name=column_name, threshold=threshold: df[
+                        column_name
+                    ].abs()
+                    >= threshold
+                )  # noqa: E03
+            elif op == "|<=":
+                f = (
+                    lambda df, column_name=column_name, threshold=threshold: df[
+                        column_name
+                    ].abs()
+                    <= threshold
+                )  # noqa: E03
+            else:
+                raise ValueError(f"invalid operator {op}")
+            functors.append(f)
+            if anno is not None:
+                annotators.append(anno)
+
+        def filter_func(df):
+            keep = np.ones(len(df), bool)
+            for f in functors:
+                keep &= f(df)
+            return keep
+
+        return filter_func, annotators
 
     def _new_for_filtering(self, new_name, load_func, deps, **kwargs):
         if not "result_dir" in kwargs:
@@ -411,18 +582,19 @@ class Load_PPG:
 
     def get_anno_dependency_callback(self, anno):
         if anno.get_cache_name() in self.ddf.anno_jobs:
+            raise NotImplementedError("Should have checked before")  # pragma: no cover
+
+        def gen():
+            self.ddf.root.load_strategy.fix_anno_tree()
             return self.ddf.anno_jobs[anno.get_cache_name()]
-        else:
 
-            def gen():
-                self.ddf.root.load_strategy.fix_anno_tree()
-                return self.ddf.anno_jobs[anno.get_cache_name()]
-
-            return gen
+        return gen
 
     def fix_anno_tree(self):
-        if self.ddf.parent is not None:
-            raise NotImplementedError("Should only be called on the root")
+        if self.ddf.parent is not None:  # pragma: no branch
+            raise NotImplementedError(
+                "Should only be called on the root"
+            )  # pragma: no cover
         if self.tree_fixed:
             return
         self.tree_fixed = True

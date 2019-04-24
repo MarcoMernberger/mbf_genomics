@@ -5,7 +5,9 @@ import pandas as pd
 from mbf_genomics import DelayedDataFrame
 from mbf_genomics.annotator import Constant, Annotator
 import pypipegraph as ppg
+from pypipegraph.testing import run_pipegraph, force_load
 from pandas.testing import assert_frame_equal
+from mbf_genomics.util import find_annos_from_column
 
 
 class LenAnno(Annotator):
@@ -18,12 +20,6 @@ class LenAnno(Annotator):
         )
 
 
-def force_load(ddf, annotate=True):
-    ppg.JobGeneratingJob("shu", lambda: 55).depends_on(
-        ddf.annotate() if annotate else ddf.load()
-    )
-
-
 @pytest.mark.usefixtures("no_pipegraph")
 @pytest.mark.usefixtures("clear_annotators")
 class Test_DelayedDataFrameDirect:
@@ -34,6 +30,13 @@ class Test_DelayedDataFrameDirect:
             return test_df
 
         a = DelayedDataFrame("shu", load)
+        assert_frame_equal(a.df, test_df)
+        assert a.non_annotator_columns == "A"
+
+    def test_create_from_df(self):
+        test_df = pd.DataFrame({"A": [1, 2]})
+
+        a = DelayedDataFrame("shu", test_df)
         assert_frame_equal(a.df, test_df)
         assert a.non_annotator_columns == "A"
 
@@ -524,6 +527,80 @@ class Test_DelayedDataFrameDirect:
             a += SeriesAnno()
             assert "declared different" in str(excinfo)
 
+    def test_filtering_by_definition_operators(self):
+        a = DelayedDataFrame("shu", pd.DataFrame({"A": [-1, 0, 1, 2, 3, 4]}))
+        assert (a.filter("a1", [("A", "==", 0)]).df["A"] == [0]).all()
+        assert (a.filter("a2", [("A", ">=", 3)]).df["A"] == [3, 4]).all()
+        assert (a.filter("a3", [("A", "<=", 0)]).df["A"] == [-1, 0]).all()
+        assert (a.filter("a4", [("A", ">", 3)]).df["A"] == [4]).all()
+        assert (a.filter("a5", [("A", "<", 0)]).df["A"] == [-1]).all()
+        assert (a.filter("a6", [("A", "|>", 0)]).df["A"] == [-1, 1, 2, 3, 4]).all()
+        assert (a.filter("a7", [("A", "|>=", 1)]).df["A"] == [-1, 1, 2, 3, 4]).all()
+        assert (a.filter("a8", [("A", "|<", 2)]).df["A"] == [-1, 0, 1]).all()
+        assert (a.filter("a9", [("A", "|<=", 2)]).df["A"] == [-1, 0, 1, 2]).all()
+        with pytest.raises(ValueError):
+            a.filter("a10", [("A", "xx", 2)])
+
+
+@pytest.mark.usefixtures("both_ppg_and_no_ppg")
+@pytest.mark.usefixtures("clear_annotators")
+class Test_DelayedDataFrameBoth:
+    def test_filtering_by_definition(self):
+        class XAnno(Annotator):
+            def __init__(self, column_name, values):
+                self.columns = [column_name]
+                self.values = values
+
+            def calc(self, df):
+                return pd.DataFrame({self.columns[0]: self.values}, index=df.index)
+
+        a = DelayedDataFrame(
+            "shu", lambda: pd.DataFrame({"A": [1, 2], "B": ["c", "d"]})
+        )
+        c = XAnno("C", [1, 2])
+        a += c
+        d = XAnno("D", [4, 5])
+
+        # native column
+        a1 = a.filter("a1", ("A", "==", 1))
+        # search for the anno
+        a2 = a.filter("a2", ("C", "==", 2))
+        # extract the column name from the anno - anno already added
+        a4 = a.filter("a4", (d, "==", 5))
+        # extract the column name from the anno - anno not already added
+        a3 = a.filter("a3", (c, "==", 1))
+        # lookup column to name
+        a6 = a.filter("a6", ("X", "==", 2), column_lookup={"X": "C"})
+        # lookup column to anno
+        a7 = a.filter("a7", ("X", "==", 2), column_lookup={"X": c})
+
+        if not ppg.inside_ppg():
+            e1 = XAnno("E", [6, 7])
+            e2 = XAnno("E", [6, 8])
+            assert find_annos_from_column("E") == [e1, e2]
+            # column name to longer unique
+            with pytest.raises(KeyError):
+                a.filter("a5", ("E", "==", 5))
+            with pytest.raises(KeyError):
+                a.filter("a5", ((c, "D"), "==", 5))
+        force_load(a1.annotate())
+        force_load(a2.annotate())
+        force_load(a3.annotate())
+        force_load(a4.annotate())
+        force_load(a6.annotate())
+        force_load(a7.annotate())
+        run_pipegraph()
+
+        assert (a1.df["A"] == [1]).all()
+
+        assert (a2.df["A"] == [2]).all()
+
+        assert (a3.df["A"] == [1]).all()
+
+        assert (a4.df["A"] == [2]).all()
+        assert (a6.df["A"] == [2]).all()
+        assert (a7.df["A"] == [2]).all()
+
 
 @pytest.mark.usefixtures("new_pipegraph")
 class Test_DelayedDataFramePPG:
@@ -535,7 +612,7 @@ class Test_DelayedDataFramePPG:
 
         a = DelayedDataFrame("shu", load)
         assert not hasattr(a, "df")
-        force_load(a, False)
+        force_load(a.load(), False)
         ppg.run_pipegraph()
         assert_frame_equal(a.df, test_df)
         assert a.non_annotator_columns == "A"
@@ -572,7 +649,7 @@ class Test_DelayedDataFramePPG:
             "shu", lambda: pd.DataFrame({"A": [1, 2], "B": ["c", "d"]})
         )
         a += Constant("aa", "aa")
-        force_load(a)
+        force_load(a.annotate())
         ppg.run_pipegraph()
         assert (a.df["aa"] == "aa").all()
 
@@ -590,7 +667,7 @@ class Test_DelayedDataFramePPG:
 
         anno1 = RaiseAnno()
         a += anno1
-        force_load(a)
+        force_load(a.annotate())
         with pytest.raises(ppg.RuntimeError):
             ppg.run_pipegraph()
         anno_job = a.anno_jobs[RaiseAnno().get_cache_name()]
@@ -611,7 +688,7 @@ class Test_DelayedDataFramePPG:
         )
         a += BrokenAnno()
         lg = a.anno_jobs[BrokenAnno().get_cache_name()]
-        force_load(a)
+        force_load(a.annotate())
         with pytest.raises(ppg.RuntimeError):
             ppg.run_pipegraph()
         assert "list" in str(lg().lfg.exception)
@@ -629,7 +706,7 @@ class Test_DelayedDataFramePPG:
                 return pd.DataFrame({"shu": [1, 2]})
 
         a += EmptyColumnNames()
-        force_load(a)
+        force_load(a.annotate())
         anno_job_cb = a.anno_jobs[EmptyColumnNames().get_cache_name()]
         with pytest.raises(ppg.RuntimeError):
             ppg.run_pipegraph()
@@ -649,7 +726,7 @@ class Test_DelayedDataFramePPG:
 
         a += MissingColumnNames()
         lg = a.anno_jobs["MissingColumnNames"]
-        force_load(a)
+        force_load(a.annotate())
         with pytest.raises(ppg.RuntimeError):
             ppg.run_pipegraph()
         assert "AttributeError" in repr(lg().lfg.exception)
@@ -669,7 +746,7 @@ class Test_DelayedDataFramePPG:
 
         a += Dynamic()
         a.anno_jobs[Dynamic().get_cache_name()]
-        force_load(a)
+        force_load(a.annotate())
         ppg.run_pipegraph()
         assert_frame_equal(
             a.df, pd.DataFrame({"A": [1, 2], "B": ["c", "d"], "a": ["x", "y"]})
@@ -997,7 +1074,7 @@ class Test_DelayedDataFramePPG:
         a = DelayedDataFrame(
             "shu", lambda: pd.DataFrame({"A": [1, 2, 3], "B": ["a", "b", "c"]})
         )
-        a += TestAnno()
+        a.add_annotator(TestAnno())
         a.write()
         ppg.run_pipegraph()
         assert (a.df["C"] == "hello").all()
