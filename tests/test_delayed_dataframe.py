@@ -1002,7 +1002,6 @@ class Test_DelayedDataFramePPG:
         ppg.run_pipegraph()
         assert (a.df["C"] == "hello").all()
 
-
     def test_nested_anno_dependencies(self):
         class Nested(Annotator):
             columns = ["b"]
@@ -1011,7 +1010,8 @@ class Test_DelayedDataFramePPG:
                 return pd.Series([10] * len(df))
 
             def dep_annos(self):
-                return [Constant('Nestedconst', 5)]
+                return [Constant("Nestedconst", 5)]
+
         class Nesting(Annotator):
             columns = ["a"]
 
@@ -1019,7 +1019,8 @@ class Test_DelayedDataFramePPG:
                 return pd.Series([15] * len(df))
 
             def dep_annos(self):
-                return [Constant('Nestingconst', 5), Nested()]
+                return [Constant("Nestingconst", 5), Nested()]
+
         anno = Nesting()
         a = DelayedDataFrame(
             "shu", lambda: pd.DataFrame({"A": [1, 2, 3], "B": ["a", "b", "c"]})
@@ -1032,4 +1033,15 @@ class Test_DelayedDataFramePPG:
         assert (a.df["Nestedconst"] == 5).all()
         assert (a.df["Nestingconst"] == 5).all()
 
+    def test_adding_in_job_generating_raises(self):
+        a = DelayedDataFrame(
+            "shu", lambda: pd.DataFrame({"A": [1, 2, 3], "B": ["a", "b", "c"]})
+        )
 
+        def gen():
+            a.add_annotator(Constant("shu", 5))
+
+        job = ppg.JobGeneratingJob("x", gen)
+        with pytest.raises(ppg.RuntimeError):
+            ppg.run_pipegraph()
+        assert isinstance(job.exception, ppg.JobContractError)

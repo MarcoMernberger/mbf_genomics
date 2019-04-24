@@ -2,8 +2,6 @@ import pandas as pd
 import pytest
 from pandas.testing import assert_frame_equal
 from mbf_genomics.annotator import Constant, Annotator
-import pytest
-import pandas as pd
 from mbf_genomics.util import (
     read_pandas,
     freeze,
@@ -37,7 +35,7 @@ def test_freeze():
 
     class Nohash:
         def __hash__(self):
-            raise NotImplemented
+            return NotImplemented
 
     with pytest.raises(TypeError):
         freeze(Nohash())

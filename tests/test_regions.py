@@ -810,7 +810,7 @@ class TestGenomicRegionsLoading:
         fn = "results/GenomicRegions/shu/shu.png"
         if inside_ppg():
             assert isinstance(pj, ppg.FileGeneratingJob)
-            assert pj.filenames[0] == str(Path(fn).absolute())
+            assert Path(pj.filenames[0]).absolute() == Path(fn).absolute()
         else:
             assert str(pj) == str(Path(fn).absolute())
         run_pipegraph()
@@ -843,7 +843,7 @@ class TestGenomicRegionsLoading:
         fn = str(Path("shu.png").absolute())
         if inside_ppg():
             assert isinstance(pj, ppg.FileGeneratingJob)
-            assert pj.filenames[0] == fn
+            assert str(Path(pj.filenames[0]).absolute()) == fn
         else:
             assert str(pj) == fn
         run_pipegraph()
@@ -1047,7 +1047,6 @@ class TestGenomicRegionsWriting:
 
     def test_write_bed_with_name_column_not_found(self):
         self.setUp()
-        from mbf_fileformats.bed import read_bed
 
         with RaisesDirectOrInsidePipegraph(KeyError):
             self.a.write_bed(self.sample_filename, region_name="name_not_found")
@@ -1091,7 +1090,7 @@ class TestGenomicRegionsWriting:
         fn = "results/GenomicRegions/shu/shu.png"
         if inside_ppg():
             assert isinstance(pj, ppg.FileGeneratingJob)
-            assert pj.filenames[0] == str(Path(fn).absolute())
+            assert Path(pj.filenames[0]).absolute() == Path(fn).absolute()
         else:
             assert str(pj) == str(Path(fn).absolute())
         run_pipegraph()
@@ -1759,9 +1758,9 @@ class TestSetOperationsOnGenomicRegions:
         self.handle(a, b, should, regions.GenomicRegions_Difference)
 
     def test_difference_split_joins(self):
-        a = [(0, 1000),]
-        b = [(500, 1000), ]
-        should = [(0, 500), ]
+        a = [(0, 1000)]
+        b = [(500, 1000)]
+        should = [(0, 500)]
         self.handle(a, b, should, regions.GenomicRegions_Difference)
 
     def test_difference_removes_annos(self):
@@ -2324,7 +2323,7 @@ class TestFromXYZ:
             force_load(a.load())
             force_load(b.load())
             jobA = a.load()
-            jobB = b.load()
+            b.load()
             with pytest.raises(ppg.RuntimeError):
                 ppg.run_pipegraph()
                 assert isinstance(jobA.exception, "ValueError")
@@ -2393,23 +2392,6 @@ class TestFromXYZ:
             else:
                 assert round(abs(val - should[ii]), 7) == 0
 
-    def test_wig(self):
-        a = regions.GenomicRegions_FromWig(
-            "shu", get_sample_data("mbf_genomics/test.wig"), get_genome_chr_length(),
-            1,2
-        )
-        force_load(a.load())
-        run_pipegraph()
-        assert len(a.df) == 6
-        assert (a.df["chr"] == ["2", "2", "2", "3", "3", "3"]).all()
-        assert (
-            a.df["start"] == [2-1,41-1,81-1,120-1,158-1]
-        ).all()
-        assert (
-            a.df["stop"] == [37+2,76+2,116+2,155+2,193+2]).all()
-
-
-
     def test_bigbed(self):
         a = regions.GenomicRegions_FromBigBed(
             "shu", get_sample_data("mbf_genomics/test.bb"), get_genome_chr_length()
@@ -2459,21 +2441,6 @@ class TestFromXYZ:
                 get_genome_chr_length(),
             )
             force_load(a.load())
-
-    def test_bed_without_score(self):
-        a = regions.GenomicRegions_FromBed(
-            "shu",
-            get_sample_data("mbf_genomics/test_without_score.bed"),
-            get_genome_chr_length(),
-        )
-        force_load(a.load())
-        run_pipegraph()
-        assert len(a.df) == 6
-        assert (a.df["chr"] == ["2", "2", "2", "3", "3", "3"]).all()
-        assert (
-            a.df["start"] == [356_591, 662_743, 1_842_875, 53968, 58681, 68187]
-        ).all()
-        assert not ("score" in a.df.columns)
 
     def test_wig(self):
         a = regions.GenomicRegions_FromWig(
@@ -2525,9 +2492,9 @@ class TestFromXYZ:
     def test_binned(self):
         genome = get_genome_chr_length()
         with pytest.raises(ValueError):
-            regions.GenomicRegions_BinnedGenome(genome, 10000, '1')
-        a = regions.GenomicRegions_BinnedGenome(genome, 10000, ['1'])
-        b = regions.GenomicRegions_BinnedGenome(genome, 10000, new_name='full_bins')
+            regions.GenomicRegions_BinnedGenome(genome, 10000, "1")
+        a = regions.GenomicRegions_BinnedGenome(genome, 10000, ["1"])
+        b = regions.GenomicRegions_BinnedGenome(genome, 10000, new_name="full_bins")
         force_load(a.load())
         force_load(b.load())
         run_pipegraph()
@@ -2536,9 +2503,9 @@ class TestFromXYZ:
 
     def test_windowed(self):
         genome = get_genome_chr_length()
-        a = regions.GenomicRegions_Windows(genome, 'win1', 10000,0, ['1'])
-        b = regions.GenomicRegions_Windows(genome, 'win2', 10000,10000, ['1'])
-        c = regions.GenomicRegions_Windows(genome, 'win3', 10000,0)
+        a = regions.GenomicRegions_Windows(genome, "win1", 10000, 0, ["1"])
+        b = regions.GenomicRegions_Windows(genome, "win2", 10000, 10000, ["1"])
+        c = regions.GenomicRegions_Windows(genome, "win3", 10000, 0)
         force_load(a.load())
         force_load(b.load())
         force_load(c.load())

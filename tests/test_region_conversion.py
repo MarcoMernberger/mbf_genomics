@@ -11,7 +11,6 @@ from .shared import (
     get_genome_chr_length,
     force_load,
     run_pipegraph,
-    RaisesDirectOrInsidePipegraph,
 )
 
 
@@ -30,7 +29,7 @@ class TestGenomicRegionConvertTests:
 
         def convert(df):
             res = df[["chr", "start", "stop"]]
-            res = res.assign(start = res['start'] + 1)
+            res = res.assign(start=res["start"] + 1)
             return res
 
         if ppg.inside_ppg():
@@ -155,9 +154,51 @@ class TestGenomicRegionConvertTests:
         def sample_data():
             return pd.DataFrame(
                 {
-                    "chr": ["1", "1", "1", "1", "1", "2", "3", "3", "3", "4", '4','4','5'],
-                    "start": [10, 13, 110, 300, 400, 102, 5, 6, 6000,         10, 100, 200, 100],
-                    "stop": [18, 100, 200, 400, 410, 1000, 5000, 4900, 6010, 100, 150, 300, 110],
+                    "chr": [
+                        "1",
+                        "1",
+                        "1",
+                        "1",
+                        "1",
+                        "2",
+                        "3",
+                        "3",
+                        "3",
+                        "4",
+                        "4",
+                        "4",
+                        "5",
+                    ],
+                    "start": [
+                        10,
+                        13,
+                        110,
+                        300,
+                        400,
+                        102,
+                        5,
+                        6,
+                        6000,
+                        10,
+                        100,
+                        200,
+                        100,
+                    ],
+                    "stop": [
+                        18,
+                        100,
+                        200,
+                        400,
+                        410,
+                        1000,
+                        5000,
+                        4900,
+                        6010,
+                        100,
+                        150,
+                        300,
+                        110,
+                    ],
                 }
             )
 
@@ -167,7 +208,7 @@ class TestGenomicRegionConvertTests:
         b = a.convert("agrown", regions.convert.merge_connected())
         force_load(b.load())
         run_pipegraph()
-        assert (b.df["chr"] == ["1", "1", "1", "2", "3", "3", "4", '4', '5']).all()
+        assert (b.df["chr"] == ["1", "1", "1", "2", "3", "3", "4", "4", "5"]).all()
         assert (b.df["start"] == [10, 110, 300, 102, 5, 6000, 10, 200, 100]).all()
         assert (b.df["stop"] == [100, 200, 410, 1000, 5000, 6010, 150, 300, 110]).all()
 
@@ -199,7 +240,7 @@ class TestGenomicRegionConvertTests:
             )
 
         a = regions.GenomicRegions("sharum", sample_data, [], get_genome_chr_length())
-        b = a.convert("hg38", regions.convert.lift_over('hg19ToHg38'))
+        b = a.convert("hg38", regions.convert.lift_over("hg19ToHg38"))
         force_load(b.load())
         run_pipegraph()
         # made these with the ucsc web liftover utility
@@ -235,8 +276,8 @@ class TestGenomicRegionConvertTests:
         )
         b = a.convert(
             "hg38",
-            regions.convert.lift_over('hg19ToHg38',
-                keep_name=True, filter_to_these_chromosomes=["1"]
+            regions.convert.lift_over(
+                "hg19ToHg38", keep_name=True, filter_to_these_chromosomes=["1"]
             ),
         )
         force_load(b.load())
@@ -277,15 +318,17 @@ class TestGenomicRegionConvertTests:
         b = a.convert("cookie", regions.convert.cookie_summit(a.summit_annotator, 220))
         c = a.convert(
             "cookieB",
-            regions.convert.cookie_summit(a.summit_annotator, 220, drop_those_outside_chromosomes=True),
+            regions.convert.cookie_summit(
+                a.summit_annotator, 220, drop_those_outside_chromosomes=True
+            ),
         )
         force_load(b.load())
         force_load(c.load())
         run_pipegraph()
         assert len(b.df) == 2
         assert len(c.df) == 1
-        assert (b.df['start'] == [0, math.floor(99*3/2)-110]).all()
-        assert (b.df['stop'] == [100+110, math.floor(99*3/2)+110]).all()
+        assert (b.df["start"] == [0, math.floor(99 * 3 / 2) - 110]).all()
+        assert (b.df["stop"] == [100 + 110, math.floor(99 * 3 / 2) + 110]).all()
 
     def test_name_must_be_string(self):
         def sample_data():
@@ -296,7 +339,7 @@ class TestGenomicRegionConvertTests:
         a = regions.GenomicRegions("sharum", sample_data, [], get_genome_chr_length())
         with pytest.raises(ValueError):
             a.convert(123, regions.convert.shift(50))
-    
+
     def test_shift(self):
         def sample_data():
             return pd.DataFrame(
@@ -308,8 +351,8 @@ class TestGenomicRegionConvertTests:
         force_load(b.load())
         run_pipegraph()
         assert len(b.df) == 2
-        assert (b.df['start'] == [50, 50]).all()
-        assert (b.df['stop'] == [200+50, 99*3+50]).all()
+        assert (b.df["start"] == [50, 50]).all()
+        assert (b.df["stop"] == [200 + 50, 99 * 3 + 50]).all()
 
     def test_summit(self):
         def sample_data():
@@ -322,20 +365,24 @@ class TestGenomicRegionConvertTests:
         force_load(b.load())
         run_pipegraph()
         assert len(b.df) == 2
-        assert (b.df['start'] == [100, 148]).all()
-        assert (b.df['stop'] == [101, 149]).all()
+        assert (b.df["start"] == [100, 148]).all()
+        assert (b.df["stop"] == [101, 149]).all()
 
     def test_cookie_cutter(self):
         def sample_data():
             return pd.DataFrame(
-                {"chr": ["1", "2"], "start": [0, 0], "stop": [200, 99 * 3],
-                 'strand': [-1, 1]}
+                {
+                    "chr": ["1", "2"],
+                    "start": [0, 0],
+                    "stop": [200, 99 * 3],
+                    "strand": [-1, 1],
+                }
             )
 
         a = regions.GenomicRegions("sharum", sample_data, [], get_genome_chr_length())
         b = a.convert("cookie", regions.convert.cookie_cutter(100))
         force_load(b.load())
         run_pipegraph()
-        assert (b.df['start'] == [50, 98]).all()
-        assert (b.df['stop'] == [50+100, 98+100]).all()
-        assert (b.df['strand'] == [-1, 1]).all()
+        assert (b.df["start"] == [50, 98]).all()
+        assert (b.df["stop"] == [50 + 100, 98 + 100]).all()
+        assert (b.df["strand"] == [-1, 1]).all()

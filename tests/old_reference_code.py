@@ -1,5 +1,4 @@
 from mbf_genomics.annotator import Annotator
-import pypipegraph as ppg
 import hashlib
 import numpy as np
 import pandas as pd
@@ -87,4 +86,3 @@ class NormalizationTPMBiotypes(Annotator):
         factor = self.normalize_to / total
         result = result * factor
         return pd.DataFrame({self.columns[0]: result})
-

@@ -5,7 +5,7 @@ import pandas as pd
 from mbf_genomics.genes.anno_tag_counts import IntervalStrategyIntron
 
 from mbf_genomics.genes import Genes, anno_tag_counts
-from mbf_qualitycontrol import do_qc, no_qc
+from mbf_qualitycontrol import prune_qc, get_qc_jobs, qc_disabled
 from mbf_qualitycontrol.testing import assert_image_equal
 from .shared import MockGenome, force_load, run_pipegraph, RaisesDirectOrInsidePipegraph
 from .old_reference_code import NormalizationCPMBiotypes, NormalizationTPMBiotypes
@@ -169,7 +169,7 @@ class MockLane(object):
         pass
 
 
-@pytest.mark.usefixtures("both_ppg_and_no_ppg")
+@pytest.mark.usefixtures("both_ppg_and_no_ppg_no_qc")
 class TestGeneCount:
     def test_unstranded(self):
 
@@ -349,25 +349,9 @@ class TestGeneCount:
         ).all()
 
 
-@pytest.mark.usefixtures("both_ppg_and_no_ppg")
+@pytest.mark.usefixtures("both_ppg_and_no_ppg_no_qc")
 class TestExonSmartCount:
     def test_validation(self):
-        genome = MockGenome(
-            pd.DataFrame(
-                [
-                    {
-                        "gene_stable_id": "FakeA",
-                        "name": "A",
-                        "tss": 500,
-                        "tes": 1000,
-                        "chr": "1",
-                        "strand": 1,
-                    }
-                ]
-            ),
-            None,
-            {"1": 10000},
-        )
         lane = object()
         with pytest.raises(ValueError):
             anno_tag_counts.ExonSmartUnstranded(lane)
@@ -584,7 +568,7 @@ class TestExonSmartCount:
         assert (gr.df[anno.columns[0]] == np.array([100 * 1, (100 + 150) * 1])).all()
 
 
-@pytest.mark.usefixtures("both_ppg_and_no_ppg")
+@pytest.mark.usefixtures("both_ppg_and_no_ppg_no_qc")
 class TestExonCount:
     def test_unstranded(self):
 
@@ -720,7 +704,7 @@ class TestExonCount:
         assert (df[anno.columns[0]] == np.array([100 * 4, (1100) * 1])).all()
 
 
-@pytest.mark.usefixtures("both_ppg_and_no_ppg")
+@pytest.mark.usefixtures("both_ppg_and_no_ppg_no_qc")
 class TestCPM:
     def test_stranded(self):
 
@@ -796,7 +780,7 @@ class TestCPM:
         ).all()
 
 
-@pytest.mark.usefixtures("both_ppg_and_no_ppg")
+@pytest.mark.usefixtures("both_ppg_and_no_ppg_no_qc")
 class TestTPM:
     def test_stranded(self):
 
@@ -876,7 +860,7 @@ class TestTPM:
         ).all()
 
 
-@pytest.mark.usefixtures("both_ppg_and_no_ppg")
+@pytest.mark.usefixtures("both_ppg_and_no_ppg_no_qc")
 class TestCPMBiotypes:
     def test_stranded(self):
 
@@ -1043,7 +1027,7 @@ class TestCPMBiotypes:
         ).all()
 
 
-@pytest.mark.usefixtures("both_ppg_and_no_ppg")
+@pytest.mark.usefixtures("both_ppg_and_no_ppg_no_qc")
 class TestTPMBiotypes:
     def test_stranded(self):
 
@@ -1120,9 +1104,9 @@ class TestTPMBiotypes:
         run_pipegraph()
         df = gr.df.sort_values("gene_stable_id")
         # length_by_gene = anno.interval_strategy.get_interval_lengths_by_gene(genome)
-        counts = np.array([400, 250.0])
-        lengths = [100.0, 250]
-        xi = counts / lengths
+        # counts = np.array([400, 250.0])
+        # lengths = [100.0, 250]
+        # xi = counts / lengths
         # tpms = xi * (1e6 / xi.sum())
         assert df[anno2.columns[0]][0] == 1e6
         assert np.isnan(df[anno2.columns[0]][1])
@@ -1280,10 +1264,9 @@ class TestTPMBiotypes:
         genome = MockGenome(genes, transcripts, {"1": 10000})
         i = IntervalStrategyIntron()
         actual = i._get_interval_tuples_by_chr(genome)
-        assert '1' in actual
-        assert len(actual['1']) == 2
-        assert len(actual['1'][0][2]) == 2
-
+        assert "1" in actual
+        assert len(actual["1"]) == 2
+        assert len(actual["1"][0][2]) == 2
 
 
 class TestFPKM:
@@ -1292,7 +1275,7 @@ class TestFPKM:
             anno_tag_counts.NormalizationFPKM(55)
 
 
-@pytest.mark.usefixtures("new_pipegraph")
+@pytest.mark.usefixtures("new_pipegraph_no_qc")
 class TestPPG:
     def test_cores_needed(self):
         genes = pd.DataFrame(
@@ -1333,35 +1316,52 @@ class TestPPG:
 
         for anno in annos:
             j = g.anno_jobs[anno.get_cache_name()]
-            assert j.cores_needed == -1
+            assert j.lfg.cores_needed == -1
 
-    def test_qc_distribution(self, new_pipegraph):
+
+@pytest.mark.usefixtures("new_pipegraph")
+class TestQC:
+    def test_qc_distribution(self):
         from mbf_sampledata import get_human_22_fake_genome, get_sample_data
         import mbf_align
 
         genome = get_human_22_fake_genome()
-        with no_qc():
-            lane = mbf_align.AlignedSample(
-                "test_lane",
-                get_sample_data(Path("mbf_align/rnaseq_spliced_chr22.bam")),
-                genome,
-                False,
-                "AA123",
-            )  # index creation is automatic
+        lane = mbf_align.AlignedSample(
+            "test_lane",
+            get_sample_data(Path("mbf_align/rnaseq_spliced_chr22.bam")),
+            genome,
+            False,
+            "AA123",
+        )  # index creation is automatic
+        lane2 = mbf_align.AlignedSample(
+            "test_lane2",
+            get_sample_data(Path("mbf_align/rnaseq_spliced_chr22.bam")),
+            genome,
+            False,
+            "AA123",
+        )  # index creation is automatic
         genes = Genes(genome)
-        anno = anno_tag_counts.GeneStranded(lane)
-        genes += anno
-        genes += anno_tag_counts.NormalizationTPM(anno)
-        genes += anno_tag_counts.NormalizationCPM(anno)
-        qc_jobs = do_qc(lambda x: "read_distribution" in str(x))
+        for l in [lane, lane2]:
+            anno = anno_tag_counts.GeneStranded(l)
+            genes += anno
+            genes += anno_tag_counts.NormalizationTPM(anno)
+            genes += anno_tag_counts.NormalizationCPM(anno)
+        assert not qc_disabled()
+        prune_qc(lambda job: "read_distribution" in job.job_id)
         run_pipegraph()
-        assert len(qc_jobs) == 3
+        qc_jobs = list(get_qc_jobs())
+        qc_jobs = [x for x in qc_jobs if not x._pruned]
+        assert len(qc_jobs) == 4  # three from our annos, one gene_unsrtanded for
         cpm_job = [x for x in qc_jobs if "CPM" in x.filenames[0]][0]
         tpm_job = [x for x in qc_jobs if "TPM" in x.filenames[0]][0]
         raw_job = [
             x
             for x in qc_jobs
-            if not "TPM" in x.filenames[0] and not "CPM" in x.filenames[0]
+            if (
+                not "TPM" in x.filenames[0]
+                and not "CPM" in x.filenames[0]
+                and not "unstranded" in x.filenames[0]
+            )
         ][0]
         assert_image_equal(raw_job.filenames[0])
         assert_image_equal(tpm_job.filenames[0], "_tpm")
@@ -1374,15 +1374,34 @@ class TestPPG:
         annos = []
         for x in a + b:
             anno = anno_tag_counts.NormalizationCPM(x)
-            with no_qc():
-                ddf += anno
+            ddf += anno
             annos.append(anno)
-        for anno in annos:
-            anno.register_qc_pca(ddf)
-        qc_jobs = do_qc()
+        ddf.write()
+        prune_qc(lambda job: "pca" in job.job_id)
         run_pipegraph()
+        qc_jobs = list(get_qc_jobs())
+        qc_jobs = [x for x in qc_jobs if not x._pruned]
         assert len(qc_jobs) == 1
         assert_image_equal(qc_jobs[0].filenames[0])
+
+    def test_qc_pca_filtered(self):
+        import mbf_sampledata
+
+        ddf, a, b = mbf_sampledata.get_pasilla_data_subset()
+        annos = []
+        for x in a + b:
+            anno = anno_tag_counts.NormalizationCPM(x)
+            ddf += anno
+            annos.append(anno)
+        ddf2 = ddf.filter('filtered', lambda df: df[anno.columns[0]] >= 100, [anno])
+        ddf2.write()
+        prune_qc(lambda job: "pca" in job.job_id)
+        run_pipegraph()
+        qc_jobs = list(get_qc_jobs())
+        qc_jobs = [x for x in qc_jobs if not x._pruned]
+        assert len(qc_jobs) == 2
+        assert_image_equal(qc_jobs[0].filenames[0])
+        assert_image_equal(qc_jobs[1].filenames[0], '_filtered')
 
     def test_qc_pca_single_sample(self):
         import mbf_sampledata
@@ -1391,13 +1410,13 @@ class TestPPG:
         annos = []
         for x in a + b:
             anno = anno_tag_counts.NormalizationCPM(x)
-            with no_qc():
-                ddf += anno
+            ddf += anno
             annos.append(anno)
             break
-        for anno in annos:
-            anno.register_qc_pca(ddf)
-        qc_jobs = do_qc()
+        prune_qc(lambda job: "pca" in job.job_id)
+        ddf.write()
         run_pipegraph()
+        qc_jobs = list(get_qc_jobs())
+        qc_jobs = [x for x in qc_jobs if not x._pruned]
         assert len(qc_jobs) == 1
         assert_image_equal(qc_jobs[0].filenames[0])

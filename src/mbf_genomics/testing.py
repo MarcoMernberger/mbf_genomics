@@ -1,11 +1,7 @@
-import pytest
-import pypipegraph as ppg
-import sys
 from mbf_genomes import HardCodedGenome
-from pypipegraph.testing import run_pipegraph, force_load, RaisesDirectOrInsidePipegraph
 
 
-def MockGenome(df_genes, df_transcripts=None, chr_lengths=None):
+def MockGenome(df_genes, df_transcripts=None, chr_lengths=None):  # noqa: C901
     if chr_lengths is None:
         chr_lengths = {
             "1": 100_000,
@@ -61,7 +57,7 @@ def MockGenome(df_genes, df_transcripts=None, chr_lengths=None):
         stops = []
         if not "strand" in df_transcripts:  # pragma: no cover
             df_transcripts = df_transcripts.assign(strand=1)
-        if not "tss" in df_transcripts: # pragma: no branch
+        if not "tss" in df_transcripts:  # pragma: no branch
             tss = []
             tes = []
             for tr, row in df_transcripts.iterrows():

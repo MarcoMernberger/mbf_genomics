@@ -69,8 +69,6 @@ class DelayedDataFrame(object):
             if ppg.inside_ppg():
                 if not self.has_annotator(other):
                     self.load_strategy.add_annotator(other)
-                    if hasattr(other, "register_qc"):
-                        other.register_qc(self)
                 elif self.get_annotator(other.get_cache_name()) is not other:
                     raise ValueError(
                         "trying to add different annotators with identical cache_names\n%s\n%s"
@@ -364,6 +362,13 @@ class Load_PPG:
         self.tree_fixed = False
 
     def add_annotator(self, anno):
+        if ppg.util.global_pipegraph.running:
+            raise ppg.JobContractError(
+                "Can not add_annotator in a running pipegraph"
+                " - the annotator structure get's fixed when a "
+                "pipegraph is run, you can't add to it in e.g. a "
+                "JobGeneratingJob"
+            )
         cache_name = anno.get_cache_name()
         forbidden_chars = "/", "?", "*"
         if any((x in cache_name for x in forbidden_chars)) or len(cache_name) > 60:
@@ -405,11 +410,15 @@ class Load_PPG:
         )
 
     def get_anno_dependency_callback(self, anno):
-        def gen():
-            self.ddf.root.load_strategy.fix_anno_tree()
+        if anno.get_cache_name() in self.ddf.anno_jobs:
             return self.ddf.anno_jobs[anno.get_cache_name()]
+        else:
 
-        return gen
+            def gen():
+                self.ddf.root.load_strategy.fix_anno_tree()
+                return self.ddf.anno_jobs[anno.get_cache_name()]
+
+            return gen
 
     def fix_anno_tree(self):
         if self.ddf.parent is not None:
@@ -441,12 +450,18 @@ class Load_PPG:
 
         def descend_and_jobify(node):
             for anno in node.ddf.annotators.values():
-                if anno.get_cache_name() in node.ddf.parent.annotators:
+                if (
+                    node.ddf.parent is not None
+                    and anno.get_cache_name() in node.ddf.parent.annotators
+                ):
                     node.ddf.anno_jobs[anno.get_cache_name()] = node._anno_load(anno)
                 else:
+                    # this is the top most node with this annotator
                     node.ddf.anno_jobs[
                         anno.get_cache_name()
                     ] = node._anno_cache_and_calc(anno)
+                if hasattr(anno, "register_qc"):
+                    anno.register_qc(node.ddf)
             for c in node.ddf.children:
                 descend_and_jobify(c.load_strategy)
 
@@ -454,8 +469,8 @@ class Load_PPG:
         for anno in self.ddf.annotators.values():
             job = self._anno_cache_and_calc(anno)
             self.ddf.anno_jobs[anno.get_cache_name()] = job
-        for c in self.ddf.children:
-            descend_and_jobify(c.load_strategy)
+        # for c in self.ddf.children:
+        descend_and_jobify(self)
 
     def _anno_load(self, anno):
         def load():
@@ -539,8 +554,7 @@ class Load_PPG:
         for d in anno.dep_annos():
             job.depends_on(self.ddf.anno_jobs[d.get_cache_name()])
         job.depends_on(anno.deps(self.ddf))
-        if hasattr(anno, "cores_needed"):
-            job.cores_needed = anno.cores_needed
+        job.lfg.cores_needed = getattr(anno, "cores_needed", 1)
         return job
 
     def annotate(self):

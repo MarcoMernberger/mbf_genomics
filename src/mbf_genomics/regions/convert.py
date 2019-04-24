@@ -67,11 +67,7 @@ def summit(summit_annotator):
     def do_summits(df):
         summit_col = summit_annotator.columns[0]
         starts = (df["start"] + df[summit_col]).astype(np.int)
-        res = {
-            "chr": df["chr"],
-            "start": starts,
-            "stop": starts + 1, 
-        }
+        res = {"chr": df["chr"], "start": starts, "stop": starts + 1}
         return pd.DataFrame(res)
 
     return do_summits, [summit_annotator]
@@ -84,6 +80,7 @@ def merge_connected():
 
     def do_merge(df):
         from mbf_nested_intervals import merge_df_intervals
+
         return merge_df_intervals(df, lambda iv: iv.merge_connected())
 
     return do_merge
@@ -105,7 +102,6 @@ class LiftOver(object):
         tmp_output = tempfile.NamedTemporaryFile(mode="wb")
         tmp_error = tempfile.NamedTemporaryFile(mode="wb")
         max_len = 0
-        strip_chr = False
         listOfChromosomeIntervals = [list(row) for row in listOfChromosomeIntervals]
         for row in listOfChromosomeIntervals:
             tmp_input.write(b" ".join(to_bytes(str(x)) for x in row))
@@ -195,7 +191,8 @@ class LiftOver(object):
             do_convert.dependencies = [
                 ppg.FileTimeInvariant(chain_file),
                 ppg.FunctionInvariant(
-                    "genomics.regions.convert.LiftOver.do_liftover", LiftOver.do_liftover
+                    "genomics.regions.convert.LiftOver.do_liftover",
+                    LiftOver.do_liftover,
                 ),
             ]
         return do_convert
@@ -225,7 +222,7 @@ def cookie_cutter(bp):
         new_stops = new_starts + bp
         new_starts[new_starts < 0] = 0
         res = pd.DataFrame({"chr": df["chr"], "start": new_starts, "stop": new_stops})
-        if "strand" in df.columns: # pragma: no branch
+        if "strand" in df.columns:  # pragma: no branch
             res["strand"] = df["strand"]
         return res
 
@@ -250,7 +247,7 @@ def cookie_summit(summit_annotator, bp, drop_those_outside_chromosomes=False):
         if drop_those_outside_chromosomes:
             res = res[res["start"] >= 0]
         else:
-            res = res.assign(start = res['start'].clip(lower=0))
+            res = res.assign(start=res["start"].clip(lower=0))
         return res
 
     return do_summits, [summit_annotator], (bp, drop_those_outside_chromosomes)

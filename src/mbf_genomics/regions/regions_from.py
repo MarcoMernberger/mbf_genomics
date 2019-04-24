@@ -210,7 +210,6 @@ def GenomicRegions_FromBigBed(
     """
     from mbf_fileformats.bed import read_bigbed
 
-
     def load():
         res = read_bigbed(filename, genome.get_chromosome_lengths(), chromosome_mangler)
         if (res["strand"] == 1).all():
@@ -284,7 +283,7 @@ def GenomicRegions_Union(
 ):
     """Combine serveral GRs into one.
 
-    Do not set on_overlap 
+    Do not set on_overlap
 
 
     """
@@ -584,7 +583,7 @@ def GenomicRegions_FromTable(
     one_based=False,
     reader=read_pandas,
 ):
-    """Read a table file (csv/tsv/xls) with the chr/start/stop columns (renamed?), optionally 
+    """Read a table file (csv/tsv/xls) with the chr/start/stop columns (renamed?), optionally
     drop all further columns"""
 
     def load():

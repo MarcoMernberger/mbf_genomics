@@ -4,14 +4,13 @@ Use these for new projects.
 
 """
 from mbf_genomics.annotator import Annotator
-import collections
 import numpy as np
 import pypipegraph as ppg
 import hashlib
 import pandas as pd
 from pathlib import Path
 from dppd import dppd
-from mbf_qualitycontrol import register_qc, QCCallback, get_qc, QCCollector
+from mbf_qualitycontrol import register_qc, QCCollectingJob, qc_disabled
 
 dp, X = dppd()
 
@@ -179,98 +178,90 @@ class IntervalStrategyExonSmart(_IntervalStrategy):
 # Now the actual tag count annotators
 class TagCountCommonQC:
     def register_qc(self, genes):
-        self.register_qc_distribution(genes)
-        self.register_qc_pca(genes)
+        if not qc_disabled():
+            self.register_qc_distribution(genes)
+            self.register_qc_pca(genes)
 
     def register_qc_distribution(self, genes):
         output_filename = genes.result_dir / self.qc_folder / f"read_distribution.png"
         output_filename.parent.mkdir(exist_ok=True)
 
-        def get_qc_job(elements):
-            def plot():
-                df = genes.df
-                return (
-                    dp(df)
-                    .select({x.aligned_lane.name: x.columns[0] for x in elements})
-                    .melt(var_name="sample", value_name="count")
-                    .p9()
-                    .theme_bw()
-                    .annotation_stripes()
-                    .geom_violin(dp.aes("sample", "count"), width=0.5)
-                    .add_boxplot(
-                        x="sample", y="count", _width=0.1, _fill=None, _color="blue"
-                    )
-                    .scale_y_continuous(
-                        trans="log10", name=self.qc_distribution_scale_y_name
-                    )
-                    .turn_x_axis_labels()
-                    .hide_x_axis_title()
-                    .render(output_filename)
+        def plot(output_filename, elements):
+            df = genes.df
+            return (
+                dp(df)
+                .select({x.aligned_lane.name: x.columns[0] for x in elements})
+                .melt(var_name="sample", value_name="count")
+                .p9()
+                .theme_bw()
+                .annotation_stripes()
+                .geom_violin(dp.aes("sample", "count"), width=0.5)
+                .add_boxplot(
+                    x="sample", y="count", _width=0.1, _fill=None, _color="blue"
                 )
-
-            return ppg.FileGeneratingJob(output_filename, plot).depends_on(
-                [genes.add_annotator(x) for x in elements]
+                .scale_y_continuous(
+                    trans="log10", name=self.qc_distribution_scale_y_name
+                )
+                .turn_x_axis_labels()
+                .hide_x_axis_title()
+                .render(output_filename)
             )
 
-        QCCollector(output_filename, get_qc_job, self)
+        return register_qc(
+            QCCollectingJob(output_filename, plot)
+            .depends_on(genes.add_annotator(self))
+            .add(self)
+        )
 
     def register_qc_pca(self, genes):
         output_filename = genes.result_dir / self.qc_folder / f"pca.png"
 
-        def get_qc_job(elements):
-            def plot():
-                df = genes.df
-                import sklearn.decomposition as decom
-                if len(elements) == 1:
-                    xy = np.array([[0],[0]]).transpose()
-                    title = "PCA %s - fake / single sample" % genes.name
-                else:
-                    pca = decom.PCA(n_components=2, whiten=False)
-                    data = genes.df[[x.columns[0] for x in elements]]
-                    data -= data.min()  # min max scaling 0..1
-                    data /= data.max()
-                    data = data[~pd.isnull(data).any(axis=1)]  # can' do pca on NAN values
-                    pca.fit(data.T)
-                    xy = pca.transform(data.T)
-                    title = "PCA %s\nExplained variance: x %.2f%%, y %.2f%%" % (
-                            genes.name,
-                            pca.explained_variance_ratio_[0] * 100,
-                            pca.explained_variance_ratio_[1] * 100,
-                        )
-                plot_df = pd.DataFrame(
-                    {
-                        "x": xy[:, 0],
-                        "y": xy[:, 1],
-                        "label": [x.plot_name for x in elements],
-                    }
-                )
-                (
-                    dp(plot_df)
-                    .p9()
-                    .theme_bw()
-                    .add_scatter("x", "y")
-                    .add_text(
-                        "x",
-                        "y",
-                        "label",
-                        _adjust_text={
-                            "expand_points": (2, 2),
-                            "arrowprops": {"arrowstyle": "->", "color": "red"},
-                        },
-                    )
-                    .scale_color_many_categories()
-                    .title(
-                        title
-                       
-                    )
-                    .render(output_filename, width=8, height=6)
-                )
+        def plot(output_filename, elements):
+            import sklearn.decomposition as decom
 
-            return ppg.FileGeneratingJob(output_filename, plot).depends_on(
-                [genes.add_annotator(x) for x in elements]
+            if len(elements) == 1:
+                xy = np.array([[0], [0]]).transpose()
+                title = "PCA %s - fake / single sample" % genes.name
+            else:
+                pca = decom.PCA(n_components=2, whiten=False)
+                data = genes.df[[x.columns[0] for x in elements]]
+                data -= data.min()  # min max scaling 0..1
+                data /= data.max()
+                data = data[~pd.isnull(data).any(axis=1)]  # can' do pca on NAN values
+                pca.fit(data.T)
+                xy = pca.transform(data.T)
+                title = "PCA %s\nExplained variance: x %.2f%%, y %.2f%%" % (
+                    genes.name,
+                    pca.explained_variance_ratio_[0] * 100,
+                    pca.explained_variance_ratio_[1] * 100,
+                )
+            plot_df = pd.DataFrame(
+                {"x": xy[:, 0], "y": xy[:, 1], "label": [x.plot_name for x in elements]}
+            )
+            (
+                dp(plot_df)
+                .p9()
+                .theme_bw()
+                .add_scatter("x", "y")
+                .add_text(
+                    "x",
+                    "y",
+                    "label",
+                    _adjust_text={
+                        "expand_points": (2, 2),
+                        "arrowprops": {"arrowstyle": "->", "color": "red"},
+                    },
+                )
+                .scale_color_many_categories()
+                .title(title)
+                .render(output_filename, width=8, height=6)
             )
 
-        QCCollector(output_filename, get_qc_job, self)
+        return register_qc(
+            QCCollectingJob(output_filename, plot)
+            .depends_on(genes.add_annotator(self))
+            .add(self)
+        )
 
 
 class _FastTagCounter(Annotator, TagCountCommonQC):
@@ -284,7 +275,11 @@ class _FastTagCounter(Annotator, TagCountCommonQC):
         self.count_strategy = count_strategy
         self.interval_strategy = interval_strategy
         self.columns = [(column_name % (self.aligned_lane.name,)).strip()]
-        self.cache_name = 'FastTagCounter_' + hashlib.md5(self.columns[0].encode("utf-8")).hexdigest()
+        self.cache_name = (
+            "FT_%s_%s" % (count_strategy.name, interval_strategy.name)
+            + "_"
+            + hashlib.md5(self.columns[0].encode("utf-8")).hexdigest()
+        )
         self.column_properties = {self.columns[0]: {"description": column_desc}}
         self.vid = aligned_lane.vid
         self.cores_needed = count_strategy.cores_needed
@@ -422,7 +417,11 @@ class _NormalizationAnno(Annotator, TagCountCommonQC):
             self.vid = None
             self.aligned_lane = None
         self.columns = [self.raw_column + " " + self.name]
-        self.cache_name = self.__class__.__name__ + '_' + hashlib.md5(self.columns[0].encode("utf-8")).hexdigest()
+        self.cache_name = (
+            self.__class__.__name__
+            + "_"
+            + hashlib.md5(self.columns[0].encode("utf-8")).hexdigest()
+        )
         if self.raw_anno is not None:
             self.plot_name = self.raw_anno.plot_name
             self.qc_folder = f"normalized_{self.name}_{self.raw_anno.count_strategy.name}_{self.raw_anno.interval_strategy.name}"

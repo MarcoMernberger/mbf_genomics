@@ -347,7 +347,7 @@ class GenomicRegions(DelayedDataFrame):
         elif self.on_overlap == "drop":
             return merge_df_intervals(df, lambda iv: iv.merge_drop())
         else:  # pragma: no branch - defensive
-            raise NotImplementedError(
+            raise NotImplementedError(  # pragma: no cover
                 "This branch should not happen - unhandled on_overlap"
             )
 
@@ -718,12 +718,12 @@ class GenomicRegions(DelayedDataFrame):
 
         @conversion_function is passed the dataframe, and must return one containing
         at least (chr, start, stop).
-        @conversion_function may be a tuple (function, [annotators]), 
-            in which case the function is treated as conversion_function 
+        @conversion_function may be a tuple (function, [annotators]),
+            in which case the function is treated as conversion_function
             and the annotators are added as dependencies
-        @conversion_function may be a tuple (function, [annotators], parameters), 
-            in which case the function is treated as conversion_function and the 
-            annotators are added as dependencies, 
+        @conversion_function may be a tuple (function, [annotators], parameters),
+            in which case the function is treated as conversion_function and the
+            annotators are added as dependencies,
             and an additional parameter_dependency is added
         @dependencies must be a list of jobs
         """

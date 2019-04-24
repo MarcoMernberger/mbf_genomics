@@ -1,6 +1,7 @@
-import pytest
-import mbf_genomics.genes as genes
-if False:
+# flake8: noqa
+if False: 
+    import pytest
+    import mbf_genomics.genes as genes
 
     @pytest.mark.usefixtures("new_pipegraph")
     class TestRegionAnnotationWithGenes:

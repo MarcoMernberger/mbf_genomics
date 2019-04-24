@@ -6,16 +6,18 @@
 """
 
 import sys
-import shutil
-import os
 import pytest
-import pypipegraph as ppg
 from pathlib import Path
 from pypipegraph.testing.fixtures import (  # noqa:F401
-    new_pipegraph,  # noqa:F401
+    new_pipegraph,
     both_ppg_and_no_ppg,
-    pytest_runtest_makereport,  # noqa:F401
+    no_pipegraph,
+    pytest_runtest_makereport,
 )  # noqa:F401
+from mbf_qualitycontrol.testing.fixtures import (  # noqa:F401
+    new_pipegraph_no_qc,
+    both_ppg_and_no_ppg_no_qc,
+)
 
 # from mbf_externals.testing.fixtures import local_store, global_store  # noqa:F401
 root = Path(__file__).parent.parent
@@ -28,50 +30,6 @@ from plotnine.tests.conftest import (  # noqa:F401
 )
 
 _setup()
-
-
-@pytest.fixture
-def no_pipegraph(request):
-    """No pipegraph, but seperate directory per test"""
-    if request.cls is None:
-        target_path = Path(request.fspath).parent / "run" / ("." + request.node.name)
-    else:
-        target_path = (
-            Path(request.fspath).parent
-            / "run"
-            / (request.cls.__name__ + "." + request.node.name)
-        )
-    if target_path.exists():  # pragma: no cover
-        shutil.rmtree(target_path)
-    target_path = target_path.absolute()
-    target_path.mkdir()
-    old_dir = Path(os.getcwd()).absolute()
-    os.chdir(target_path)
-    try:
-
-        def np():
-            ppg.util.global_pipegraph = None
-            return None
-
-        def finalize():
-            if hasattr(request.node, "rep_setup"):
-
-                if request.node.rep_setup.passed and (
-                    request.node.rep_call.passed
-                    or request.node.rep_call.outcome == "skipped"
-                ):
-                    try:
-                        shutil.rmtree(target_path)
-                    except OSError:  # pragma: no cover
-                        pass
-
-        request.addfinalizer(finalize)
-        ppg.util.global_pipegraph = None
-        yield np()
-
-    finally:
-        os.chdir(old_dir)
-
 
 
 @pytest.fixture

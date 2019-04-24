@@ -44,7 +44,7 @@ class Annotator(ABC):
             return self.columns[0]
 
     def calc(self, df):
-        raise NotImplementedError()
+        raise NotImplementedError()  # pragma: no cover
 
     def deps(self, ddf):
         """Return ppg.jobs"""

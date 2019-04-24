@@ -831,7 +831,7 @@ class TestGenes:
             g.write(mangler_function=lambda df: df.tail())
         a = g.write()
         b = g.write("b.xls")
-        mangle = lambda df: df.head()
+        mangle = lambda df: df.head()  # noqa: E731
         c = g.write("c.xls", mangle)
         # this is ok...
         c = g.write("c.xls", mangle)
@@ -1036,11 +1036,11 @@ class TestGenesFrom:
         assert len(d.df) == 1
         assert list(d.df.gene_stable_id) == list(a.df.gene_stable_id.loc[4:4])
 
-    def test_intersection(self):
+    def test_intersection2(self):
         genome = get_genome()
         a = genes.Genes(genome)
-        b = a.filter("filtered", lambda df: df.index[:5], vid='AA')
-        c = b.filter("filtered2", lambda df: df.index[:1], vid=['BB', 'CC'])
+        b = a.filter("filtered", lambda df: df.index[:5], vid="AA")
+        c = b.filter("filtered2", lambda df: df.index[:1], vid=["BB", "CC"])
         with pytest.raises(ValueError):
             d = genes.Genes_FromIntersection("delta", b, c)
         d = genes.Genes_FromIntersection("delta", [b, c])
@@ -1049,9 +1049,9 @@ class TestGenesFrom:
         run_pipegraph()
         assert len(d.df) == 1
         assert list(d.df.gene_stable_id) == list(a.df.gene_stable_id.loc[0:0])
-        assert 'AA' in d.vid
-        assert 'BB' in d.vid
-        assert 'CC' in d.vid
+        assert "AA" in d.vid
+        assert "BB" in d.vid
+        assert "CC" in d.vid
 
     def test_from_any(self):
         genome = get_genome()
@@ -1059,15 +1059,17 @@ class TestGenesFrom:
         b = a.filter("filtered", lambda df: df.index[:5])
         c = a.filter("filtered2", lambda df: df.index[-5:])
         d = a.filter("filtered3", lambda df: df.index[10:15])
-        e = genes.Genes_FromAny("delta", [b, c, d], sheet_name='shu')
+        e = genes.Genes_FromAny("delta", [b, c, d], sheet_name="shu")
         force_load(e.load())
         force_load(a.load())
         run_pipegraph()
         assert len(e.df) == 15
-        assert sorted(list(e.df.gene_stable_id)) == sorted(list(a.df.gene_stable_id.iloc[:5]) + list(
-            a.df.gene_stable_id.iloc[10:15]
-        ) + list(a.df.gene_stable_id.iloc[-5:]))
-        assert '/shu/' in str(e.result_dir)
+        assert sorted(list(e.df.gene_stable_id)) == sorted(
+            list(a.df.gene_stable_id.iloc[:5])
+            + list(a.df.gene_stable_id.iloc[10:15])
+            + list(a.df.gene_stable_id.iloc[-5:])
+        )
+        assert "/shu/" in str(e.result_dir)
 
     def test_from_all(self):
         genome = get_genome()
@@ -1098,40 +1100,44 @@ class TestGenesFrom:
         genome = get_genome()
         a = genes.Genes(genome)
         b = a.filter("filtered", lambda df: df.index[:5])
-        b.write(Path('filtered.xls').absolute())
+        b.write(Path("filtered.xls").absolute())
         force_load(b.load())
         print(both_ppg_and_no_ppg)
         run_pipegraph()
-        assert not 'summit middle' in a.df.columns
-        assert not 'summit middle' in b.df.columns
+        assert not "summit middle" in a.df.columns
+        assert not "summit middle" in b.df.columns
         print(both_ppg_and_no_ppg)
         both_ppg_and_no_ppg.new_pipegraph()
         genome = get_genome()
-        c = genes.Genes_FromFile('reimport', genome, Path('filtered.xls').absolute())
+        c = genes.Genes_FromFile("reimport", genome, Path("filtered.xls").absolute())
         force_load(c.load())
         run_pipegraph()
         assert_frame_equal(b.df, c.df)
 
     def test_genes_from_file_of_transcripts(self):
         genome = get_genome()
-        df = pd.DataFrame({'a column!': genome.df_transcripts.index[:5]})
+        df = pd.DataFrame({"a column!": genome.df_transcripts.index[:5]})
         df.to_excel("transcripts.xls")
-        a = genes.Genes_FromFileOfTranscripts('my genes', genome, 'transcripts.xls', 'a column!')
+        a = genes.Genes_FromFileOfTranscripts(
+            "my genes", genome, "transcripts.xls", "a column!"
+        )
         force_load(a.load())
         run_pipegraph()
         assert len(a.df) == 5
         tr = set()
-        for gene_stable_id in a.df['gene_stable_id']:
-            tr.update([tr.transcript_stable_id for tr in genome.genes[gene_stable_id].transcripts])
+        for gene_stable_id in a.df["gene_stable_id"]:
+            tr.update(
+                [
+                    tr.transcript_stable_id
+                    for tr in genome.genes[gene_stable_id].transcripts
+                ]
+            )
         assert tr == set(genome.df_transcripts.index[:5])
 
     def test_genes_from_biotypes(self):
         genome = get_genome()
-        nc = ['tRNA','rRNA']
+        nc = ["tRNA", "rRNA"]
         non_coding = genes.Genes_FromBiotypes(genome, nc)
         force_load(non_coding.load())
         run_pipegraph()
         assert len(non_coding.df) == genome.df_genes.biotype.isin(nc).sum()
-
-
-  
