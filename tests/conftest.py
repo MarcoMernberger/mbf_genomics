@@ -6,7 +6,7 @@
 """
 
 import sys
-import pytest
+import pytest  # noqa:F401
 from pathlib import Path
 from pypipegraph.testing.fixtures import (  # noqa:F401
     new_pipegraph,
@@ -31,7 +31,6 @@ from plotnine.tests.conftest import (  # noqa:F401
 )
 
 _setup()
-
 
 
 def pytest_generate_tests(metafunc):

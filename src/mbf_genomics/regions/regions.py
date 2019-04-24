@@ -276,7 +276,7 @@ class GenomicRegions(DelayedDataFrame):
         for x in df.columns:
             if not x in cols:
                 cols.append(x)
-        df = df[cols].reset_index(drop=True)
+        df = df[cols]
 
         return df
 

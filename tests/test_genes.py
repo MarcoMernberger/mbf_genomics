@@ -53,6 +53,25 @@ class TestGenesLoading:
         assert g.df["stop"].iloc[-1] == 159_662
         assert g.df["strand"].iloc[-1] == -1
 
+    def test_filtering_with_annotator(self):
+        import mbf_genomics
+
+        g = genes.Genes(get_genome())
+
+        class CopyAnno(mbf_genomics.annotator.Annotator):
+            def __init__(self):
+                self.columns = ["copy"]
+
+            def calc(self, df):
+                return pd.DataFrame({"copy": df["gene_stable_id"]})
+
+        g += CopyAnno()
+        filtered = g.filter("a", ("gene_stable_id", "==", "CRP_003"))
+        force_load(filtered.annotate())
+        run_pipegraph()
+        assert (filtered.df["gene_stable_id"] == ["CRP_003"]).all()
+        assert (filtered.df["copy"] == ["CRP_003"]).all()
+
     def test_alternative_loading_raises_on_non_df(self):
         with RaisesDirectOrInsidePipegraph(ValueError):
             g = genes.Genes(get_genome_chr_length(), lambda: None, "myname")

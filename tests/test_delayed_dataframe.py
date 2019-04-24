@@ -542,17 +542,19 @@ class Test_DelayedDataFrameDirect:
             a.filter("a10", [("A", "xx", 2)])
 
 
+class XAnno(Annotator):
+    def __init__(self, column_name, values):
+        self.columns = [column_name]
+        self.values = values
+
+    def calc(self, df):
+        return pd.DataFrame({self.columns[0]: self.values}, index=df.index)
+
+
 @pytest.mark.usefixtures("both_ppg_and_no_ppg")
 @pytest.mark.usefixtures("clear_annotators")
 class Test_DelayedDataFrameBoth:
     def test_filtering_by_definition(self):
-        class XAnno(Annotator):
-            def __init__(self, column_name, values):
-                self.columns = [column_name]
-                self.values = values
-
-            def calc(self, df):
-                return pd.DataFrame({self.columns[0]: self.values}, index=df.index)
 
         a = DelayedDataFrame(
             "shu", lambda: pd.DataFrame({"A": [1, 2], "B": ["c", "d"]})

@@ -370,7 +370,7 @@ class DelayedDataFrame(object):
     def mangle_df_for_write(self, df):
         return df
 
-    def write(self, output_filename=None, mangler_function=None):
+    def write(self, output_filename=None, mangler_function=None, float_format="%.2g"):
         """Job: Store the internal DataFrame (df) in a table.
         To sort, filter, remove columns, etc before output,
         pass in a mangler_function (takes df, returns df)
@@ -386,11 +386,22 @@ class DelayedDataFrame(object):
                 df = self.mangle_df_for_write(self.df)
             if str(output_filename).endswith(".xls"):
                 try:
-                    df.to_excel(output_filename, index=False)
+                    df.to_excel(output_filename, index=False, float_format=float_format)
                 except (ValueError):
-                    df.to_csv(output_filename, sep="\t", index=False)
+                    df.to_csv(
+                        output_filename,
+                        sep="\t",
+                        index=False,
+                        float_format=float_format,
+                    )
             else:
-                df.to_csv(output_filename, sep="\t", index=False, encoding="utf-8")
+                df.to_csv(
+                    output_filename,
+                    sep="\t",
+                    index=False,
+                    encoding="utf-8",
+                    float_format=float_format,
+                )
 
         if self.load_strategy.build_deps:
             deps = [
@@ -398,6 +409,7 @@ class DelayedDataFrame(object):
                 ppg.FunctionInvariant(
                     str(output_filename) + "_mangler", mangler_function
                 ),
+                ppg.ParameterInvariant(str(output_filename), float_format),
             ]
         else:
             deps = []
