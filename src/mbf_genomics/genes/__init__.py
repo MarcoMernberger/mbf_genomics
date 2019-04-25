@@ -10,6 +10,7 @@ from .genes_from import (
     Genes_FromBiotypes,
 )
 from . import anno_tag_counts
+from . import annotators
 
 
 __all__ = [

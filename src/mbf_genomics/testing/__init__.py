@@ -1,7 +1,7 @@
 from mbf_genomes import HardCodedGenome
 
 
-def MockGenome(df_genes, df_transcripts=None, chr_lengths=None):  # noqa: C901
+def MockGenome(df_genes, df_transcripts=None, chr_lengths=None, df_genes_meta=None):  # noqa: C901
     if chr_lengths is None:
         chr_lengths = {
             "1": 100_000,
@@ -82,4 +82,6 @@ def MockGenome(df_genes, df_transcripts=None, chr_lengths=None):  # noqa: C901
     result.sanity_check_genes(df_genes)
     if df_transcripts is not None and len(df_transcripts):
         result.sanity_check_transcripts(df_transcripts)
+    if df_genes_meta is not None:
+        result.df_genes_meta = df_genes_meta
     return result
