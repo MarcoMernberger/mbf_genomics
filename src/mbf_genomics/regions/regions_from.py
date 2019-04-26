@@ -403,7 +403,7 @@ def GenomicRegions_Invert(new_name, gr, summit_annotator=None, sheet_name="Inver
                 pd.DataFrame({"start": [0], "stop": [chr_lengths[chr]], "chr": chr})
             )
 
-        return pd.concat(out)
+        return pd.concat(out).reset_index(drop=True)
 
     if gr.load_strategy.build_deps:
         deps = [
@@ -713,10 +713,10 @@ def GenomicRegions_FilterRemoveOverlapping(
 
     def filter_func(df):
         keep = np.zeros((len(df)), dtype=np.bool)
-        for ii, row in df[["chr", "start", "stop"]].iterrows():
+        for ii, tup in enumerate(df[["chr", "start", "stop"]].itertuples()):
             for other_gr in other_grs:
                 keep[ii] = keep[ii] | other_gr.has_overlapping(
-                    row["chr"], row["start"], row["stop"]
+                    tup.chr, tup.start, tup.stop
                 )
         return ~keep
 
@@ -758,9 +758,9 @@ def GenomicRegions_FilterToOverlapping(
 
     def filter_func(df):
         keep = np.ones((len(df)), dtype=np.bool)
-        for ii, row in df[["chr", "start", "stop"]].iterrows():
+        for ii, row in enumerate(df[["chr", "start", "stop"]].itertuples()):
             for gr in other_grs:
-                keep[ii] &= gr.has_overlapping(row["chr"], row["start"], row["stop"])
+                keep[ii] &= gr.has_overlapping(row.chr, row.start, row.stop)
         return keep
 
     if gr_a.load_strategy.build_deps:

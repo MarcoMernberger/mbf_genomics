@@ -370,7 +370,7 @@ class DelayedDataFrame(object):
     def mangle_df_for_write(self, df):
         return df
 
-    def write(self, output_filename=None, mangler_function=None, float_format="%.2g"):
+    def write(self, output_filename=None, mangler_function=None, float_format="%4g"):
         """Job: Store the internal DataFrame (df) in a table.
         To sort, filter, remove columns, etc before output,
         pass in a mangler_function (takes df, returns df)

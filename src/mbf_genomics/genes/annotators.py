@@ -16,7 +16,10 @@ class Description(Annotator):
 
     def calc_ddf(self, ddf):
         if self.genome is None:
-            genome = ddf.genome
+            try:
+                genome = ddf.genome
+            except AttributeError:
+                raise AttributeError("ddf had no .genome and no genome was passed to Description")
         else:
             genome = self.genome
         lookup = dict(genome.df_genes_meta["description"].items())

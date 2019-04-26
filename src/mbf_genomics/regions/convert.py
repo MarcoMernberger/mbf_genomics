@@ -46,7 +46,9 @@ def promotorize(basepairs=1250):
         res["stop"][~forward] += basepairs
         res["strand"] = df["strand"]
         res["gene_stable_id"] = df["gene_stable_id"]
-        return pd.DataFrame(res)
+        res = pd.DataFrame(res)
+        res = res[res["start"] != res["stop"]]  # can happen by the 0 limiting
+        return res
 
     return do_promotorize, [], basepairs
 
@@ -147,16 +149,14 @@ class LiftOver(object):
             filter_to_these_chromosomes = set(filter_to_these_chromosomes)
 
         def do_convert(df):
-            if keep_name:
-                input_tuples = [
-                    ("chr" + row["chr"], row["start"], row["stop"], row["name"])
-                    for dummy_idx, row in df.iterrows()
-                ]
-            else:
-                input_tuples = [
-                    ("chr" + row["chr"], row["start"], row["stop"])
-                    for dummy_idx, row in df.iterrows()
-                ]
+            if df.index.duplicated().any():  # pragma: no cover
+                raise ValueError("liftover only works with unique indices")
+            df.index = [str(x) for x in df.index]
+            input_tuples = [
+                ("chr" + row["chr"], row["start"], row["stop"], idx)
+                for idx, row in df.iterrows()
+            ]
+
             output_tuples = self.do_liftover(input_tuples, chain_file)
             output_lists = list(zip(*output_tuples))
             res = pd.DataFrame(
@@ -164,10 +164,9 @@ class LiftOver(object):
                     "chr": output_lists[0],
                     "start": output_lists[1],
                     "stop": output_lists[2],
+                    "parent": [x.decode("utf-8") for x in output_lists[3]],
                 }
-            )
-            if keep_name:
-                res = res.assign(name=[x.decode("utf-8") for x in output_lists[3]])
+            ).set_index("parent")
             new_chr = []
             for x in res["chr"]:
                 x = x[3:]

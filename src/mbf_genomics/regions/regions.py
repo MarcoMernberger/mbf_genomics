@@ -14,6 +14,7 @@ from mbf_nested_intervals import (
     merge_df_intervals,
     merge_df_intervals_with_callback,
     IntervalSet,
+    _df_to_tup_no_strand,
 )
 
 
@@ -284,9 +285,7 @@ class GenomicRegions(DelayedDataFrame):
         """depending on L{GenomicRegion.on_overlap}, check
         for overlapping regions and handle accordingly"""
         if self.on_overlap == "raise":
-            df = df.sort_values(["chr", "start"], ascending=[True, True]).reset_index(
-                drop=True
-            )
+            df = df.sort_values(["chr", "start"], ascending=[True, True])
             last_chr = None
             last_stop = 0
             last_row = None
@@ -321,27 +320,14 @@ class GenomicRegions(DelayedDataFrame):
             return merge_df_intervals_with_callback(df, self.on_overlap[1])
 
         elif self.on_overlap == "ignore":
-            df = df.sort_values(["chr", "start"], ascending=[True, True]).reset_index(
-                drop=True
-            )  # still need to sort at least by chr...
-            if "is_overlapping" in df.columns:
-                del df["is_overlapping"]
-            is_overlapping = np.zeros((len(df),), dtype=np.bool)
-            last_chr = None
-            last_stop = 0
-            last_row = None
-            last_row_index = 0
-            for ii, row in df.iterrows():
-                if row["chr"] != last_chr:
-                    last_chr = row["chr"]
-                    last_stop = 0
-                if row["start"] < last_stop:
-                    is_overlapping[last_row_index] = True
-                    is_overlapping[ii] = True
-                last_stop = row["stop"]
-                last_row = row
-                last_row_index = ii
-            df = df.assign(is_overlapping=is_overlapping)
+            df = df.sort_values(["chr", "start"], ascending=[True, True])
+            ov = []
+            tups = _df_to_tup_no_strand(df)
+            for chr, sub_group in itertools.groupby(tups, lambda tup: tup[0]):
+                args = [x[1:] for x in sub_group]
+                iv = IntervalSet.from_tuples_with_id(args)
+                ov.extend(iv.overlap_status())
+            df = df.assign(is_overlapping=ov)
             return df
 
         elif self.on_overlap == "drop":

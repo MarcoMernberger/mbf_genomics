@@ -100,6 +100,43 @@ class TestGenomicRegionsLoading:
         assert "start" in a.df.columns
         assert "stop" in a.df.columns
 
+    def test_filtering_copy_anno(self, clear_annotators):
+        import mbf_genomics
+
+        def sample_data():
+            return pd.DataFrame(
+                {
+                    "chr": "Chromosome",
+                    "start": [1000, 1001, 1002],
+                    "stop": [1100, 1101, 1102],
+                }
+            )
+
+        a = regions.GenomicRegions(
+            "sha", sample_data, [], get_genome(), on_overlap="ignore"
+        )
+        b = a.filter("filtered", ("start", "==", 1001))
+
+        class CopyAnno(mbf_genomics.annotator.Annotator):
+            def __init__(self):
+                self.columns = ["copy"]
+
+            def calc(self, df):
+                return pd.DataFrame({"copy": df["start"]})
+
+        a += CopyAnno()
+
+        if inside_ppg():
+            assert not hasattr(a, "df")
+            force_load(a.load())
+            force_load(b.annotate())
+        else:
+            assert hasattr(a, "df")
+        run_pipegraph()
+        print(b.df)
+        assert (b.df["start"] == [1001]).all()
+        assert (b.df["copy"] == [1001]).all()
+
     def test_raises_on_invalid_on_overlap(self):
         def inner():
             regions.GenomicRegions(
@@ -260,7 +297,7 @@ class TestGenomicRegionsLoading:
         a = regions.GenomicRegions("sharum", sample_data, [], get_genome())
         force_load(a.load)
         run_pipegraph()
-        assert a.df.index == [0]
+        assert a.df.index == ["a"]
         assert not "myindex" in a.df.columns
 
     def test_merges_overlapping_intervals(self):
@@ -619,8 +656,11 @@ class TestGenomicRegionsLoading:
 
         run_pipegraph()
         assert len(a.df) == 7
-        assert (a.df.index == [0, 1, 2, 3, 4, 5, 6]).all()
-        assert not (a.df.is_overlapping == 55).any()
+        assert (a.df.index == ["a", "c", "f", "b", "d", "g", "e"]).all()
+        assert not (a.df.is_overlapping == 55).any()  # make sure we drop the column
+        assert (
+            a.df.is_overlapping == [True, True, False, False, False, False, False]
+        ).any()
 
     def test_merging_apperantly_creating_negative_intervals(self):
         def sample_data():
@@ -1058,8 +1098,7 @@ class TestGenomicRegionsWriting:
         assert len(self.a.df) > 0
         df = pd.read_csv(self.sample_filename, sep="\t")
         df["chr"] = df["chr"].astype(str)
-        for col in self.a.df.columns:
-            assert (self.a.df[col] == df[col]).all()
+        assert_frame_equal(df, self.a.df.reset_index(drop=True), check_less_precise=2)
 
     def test_write_without_filename(self):
         self.setUp()
@@ -1080,7 +1119,7 @@ class TestGenomicRegionsWriting:
         df["chr"] = df["chr"].astype(str)
         assert set(df.columns) == set(self.a.df.columns)
         df = df[self.a.df.columns]  # make them have the same order
-        assert not (df == self.a.df).all().all()
+        assert not (df["start"].values == self.a.df["start"].values).all()
         assert (df == self.a.df.sort_values("start").reset_index(drop=True)).all().all()
 
     def test_plot_plots(self):
@@ -1259,6 +1298,9 @@ class TestFilter:
         d = regions.GenomicRegions_FilterToOverlapping("d", self.a, [b, b])
         d.write("shu.tsv")
         run_pipegraph()
+        print("a", self.a.df)
+        print("b", b.df)
+        print("c", c.df)
         assert len(c.df) == 1
         assert (c.df["chr"] == ["1"]).all()
         assert (c.df["start"] == [1000]).all()
@@ -1946,7 +1988,9 @@ class TestSetOperationsOnGenomicRegions:
         force_load(b.load())
         force_load(should.load())
         run_pipegraph()
-        assert (b.df == should.df).all().all()
+        assert_frame_equal(
+            b.df.reset_index(drop=True), should.df.reset_index(drop=True)
+        )
 
     def test_invert_twice(self):
         def sample_data():
@@ -1966,7 +2010,9 @@ class TestSetOperationsOnGenomicRegions:
         assert not "strand" in a.df.columns
         assert not "strand" in b.df.columns
         assert not "strand" in c.df.columns
-        assert (c.df == a.df).all().all()
+        assert_frame_equal(
+            c.df.reset_index(drop=True), a.df.reset_index(drop=True), check_dtype=False
+        )
 
     def test_invert_preserves_annos(self):
         a = [(10, 100), (400, 450)]

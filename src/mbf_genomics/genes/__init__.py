@@ -24,4 +24,5 @@ __all__ = [
     "Genes_FromFileOfTranscripts",
     "Genes_FromBiotypes",
     "anno_tag_counts",
+    "annotators",
 ]

@@ -6,12 +6,7 @@ import pypipegraph as ppg
 from mbf_genomics import regions, genes
 from mbf_genomics.annotator import Constant
 
-from .shared import (
-    get_genome,
-    get_genome_chr_length,
-    force_load,
-    run_pipegraph,
-)
+from .shared import get_genome, get_genome_chr_length, force_load, run_pipegraph
 
 
 @pytest.mark.usefixtures("both_ppg_and_no_ppg")
@@ -132,15 +127,15 @@ class TestGenomicRegionConvertTests:
         force_load(b.load())
         run_pipegraph()
         assert len(g.df) > 0
-        assert len(g.df) == len(b.df)
+        assert len(g.df) == len(b.df) + 1  # we drop one that ends up at 0..0
         assert "strand" in b.df.columns
         # we have to go by index - the order might change
-        # convert to list of strings - bug in at it won't work otherwise
+        # convert to list of strings - bug in at, it won't work otherwise
         b_df = b.df.assign(gene_stable_id=[x for x in b.df.gene_stable_id])
         g_df = g.df.assign(gene_stable_id=[x for x in g.df.gene_stable_id])
         b_df = b_df.set_index("gene_stable_id")
         g_df = g_df.set_index("gene_stable_id")
-        assert set(b_df.index) == set(g_df.index)
+        assert set(b_df.index) == set(g_df[1:].index)  # again the one that we dropped
 
         for ii in b_df.index:
             if g_df.at[ii, "strand"] == 1:

@@ -1,5 +1,6 @@
 import pytest
 import pandas as pd
+from pandas.testing import assert_frame_equal
 import pypipegraph as ppg
 from pathlib import Path
 from mbf_genomics import DelayedDataFrame
@@ -351,7 +352,7 @@ class Test_FromOldGenomics:
         df = pd.read_csv(fn_4, sep="\t")
         print(df)
         assert (df["shaw"] == ["d4"]).all()
-        assert (df == fourth.df.reset_index(drop=True)).all().all()
+        assert_frame_equal(df, fourth.df.reset_index(drop=True), check_less_precise=2)
 
     def test_changing_anno_that_filtering_doesnt_care_about_does_not_retrigger_child_rebuild(
         self, new_pipegraph
@@ -411,7 +412,7 @@ class Test_FromOldGenomics:
         a.write(Path("shu.xls").absolute())
         ppg.run_pipegraph()
         df = pd.read_excel("shu.xls")
-        assert (df == a.df).all().all()
+        assert_frame_equal(df, a.df, check_less_precise=2, check_dtype=False)
 
 
 @pytest.mark.usefixtures("new_pipegraph")
