@@ -47,83 +47,62 @@ def freeze(obj):
         raise TypeError(msg)
 
 
-def parse_a_or_c_to_column(k):
-    """Parse an annotator + column spec to the column name.
-        Input may be
-            a str - column name
-            an annotaator -> anno.columns[0]
-            an (annotator, str) tuple -> str
-            an (annotator, int(i)) tuple -> annotator.columns[i]
+def parse_a_or_c(ac):
+    """parse  an annotator/column combo into a tuple
+    anno, column
+
+    Input may be
+            a str -> None, column name
+            an annotator -> anno, anno.columns[0]
+            an (annotator, str) tuple -> anno, str
+            an (annotator, int(i)) tuple -> anno, annotator.columns[i]
     """
     from mbf_genomics.annotator import Annotator
 
-    if isinstance(k, str):
-        return k
-    elif isinstance(k, Annotator):
-        return k.columns[0]
-    elif isinstance(k, tuple) and len(k) == 2 and isinstance(k[0], Annotator):
-        if isinstance(k[1], int):
-            return k[0].columns[k[1]]
+    if isinstance(ac, str):
+        return (None, ac)
+    elif isinstance(ac, Annotator):
+        return ac, ac.columns[0]
+    elif isinstance(ac, tuple) and len(ac) == 2 and isinstance(ac[0], Annotator):
+        if isinstance(ac[1], int):
+            return ac[0], ac[0].columns[ac[1]]
         else:
-            if not k[1] in k[0].columns:
+            if not ac[1] in ac[0].columns:
                 raise KeyError(
-                    "Invalid column name, %s -annotator had %s", (k[1], k[0].columns)
+                    "Invalid column name, %s -annotator had %s", (ac[1], ac[0].columns)
                 )
-            return k[1]
+            return ac
+    elif isinstance(ac, tuple) and len(ac) == 2 and ac[0] is None:
+        return ac
     else:
-        raise ValueError("parse_a_or_c_to_column could not parse %s" % (k,))
+        raise ValueError("parse_a_or_c could not parse %s" % (ac,))
+
+
+def parse_a_or_c_to_column(k):
+    """Parse an annotator + column spec to the column name.
+    See parse_a_or_c
+    """
+    return parse_a_or_c(k)[1]
 
 
 def parse_a_or_c_to_anno(k):
     """Parse an annotator + column spec to the annotator (or None)
-        Input may be
-            a str - column name
-            an annotaator -> anno.columns[0]
-            an (annotator, str) tuple -> str
-            an (annotator, int(i)) tuple -> annotator.columns[i]
+    See parse_a_or_c
     """
-    from mbf_genomics.annotator import Annotator
-
-    if isinstance(k, str):
-        return None
-    elif isinstance(k, Annotator):
-        return k
-    elif isinstance(k, tuple) and len(k) == 2 and isinstance(k[0], Annotator):
-        if isinstance(k[1], int):
-            k[0].columns[k[1]]  # check for exception...
-            return k[0]
-        else:
-            if not k[1] in k[0].columns:
-                raise KeyError(
-                    "Invalid column name, %s -annotator had %s", (k[1], k[0].columns)
-                )
-            return k[0]
-    else:
-        raise ValueError("parse_a_or_c_to_column could not parse %s" % (k,))
+    return parse_a_or_c(k)[0]
 
 
 def parse_a_or_c_to_plot_name(k):
     """Parse an annotator + column spec to a plot name
     See parse_a_or_c_to_column
 
-    """
-    from mbf_genomics.annotator import Annotator
+    Defaults to column name if no plot_name is defined on annotator
 
-    if isinstance(k, str):
+    """
+    ac = parse_a_or_c(k)
+    if ac[0] is None:
         return k
-    elif isinstance(k, Annotator):
-        return getattr(k, "plot_name", k.columns[0])
-    elif isinstance(k, tuple) and len(k) == 2 and isinstance(k[0], Annotator):
-        if isinstance(k[1], int):
-            return getattr(k[0], "plot_name", k[0].columns[k[1]])
-        else:
-            if not k[1] in k[0].columns:
-                raise KeyError(
-                    "Invalid column name, %s -annotator had %s", (k[1], k[0].columns)
-                )
-            return getattr(k[0], "plot_name", k[1])
-    else:
-        raise ValueError("parse_a_or_c_to_column could not parse %s" % (k,))
+    return getattr(ac[0], "plot_name", ac[1])
 
 
 def find_annos_from_column(k):
@@ -138,7 +117,7 @@ def find_annos_from_column(k):
         singleton_dict = annotator.annotator_singletons
 
     res = []
-    for anno in singleton_dict['lookup']:
+    for anno in singleton_dict["lookup"]:
         if k in anno.columns:
             res.append(anno)
     if res:
