@@ -440,8 +440,9 @@ class DelayedDataFrame(object):
                 deps.extend([self.add_annotator(x) for x in annotators])
         else:
             deps = []
-            for anno in annotators:
-                self += anno
+            if annotators is not None:
+                for anno in annotators:
+                    self += anno
         return self.load_strategy.generate_file(output_filename, do_plot, deps)
 
     def pathify(self, output_filename, default=None):
