@@ -415,7 +415,7 @@ class DelayedDataFrame(object):
             deps = []
         return self.load_strategy.generate_file(output_filename, write, deps)
 
-    def plot(self, output_filename, plot_func, calc_func=None, annotators = None):
+    def plot(self, output_filename, plot_func, calc_func=None, annotators=None):
         output_filename = self.pathify(output_filename)
 
         def do_plot(output_filename=output_filename):
@@ -432,7 +432,7 @@ class DelayedDataFrame(object):
                 ppg.FunctionInvariant(
                     output_filename.with_name(output_filename.name + "_plot_func"),
                     plot_func,
-                ),
+                )
             ]
             if annotators is None:
                 deps.append(self.annotate())

@@ -68,10 +68,7 @@ class TestAnnotatorParsing:
             parse_a_or_c_to_column((PolyConstant(["shu", "sha"], [5, 10]), "sha"))
             == "sha"
         )
-        assert (
-            parse_a_or_c_to_column((None,  "shi"))
-            == "shi"
-        )
+        assert parse_a_or_c_to_column((None, "shi")) == "shi"
         with pytest.raises(KeyError):
             parse_a_or_c_to_column((PolyConstant(["shu", "sha"], [5, 10]), "shi"))
         with pytest.raises(IndexError):
