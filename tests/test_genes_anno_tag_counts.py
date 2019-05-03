@@ -1318,6 +1318,69 @@ class TestPPG:
             j = g.anno_jobs[anno.get_cache_name()]
             assert j.lfg.cores_needed == -1
 
+    def test_tpm_subset_of_genes(self, new_pipegraph_no_qc):
+        from mbf_sampledata import get_human_22_fake_genome, get_sample_data
+        from mbf_qualitycontrol import disable_qc
+        import pypipegraph as ppg
+        import mbf_align
+        from mbf_genomics.annotator import Annotator
+
+        ppg.util.global_pipegraph.quiet = False
+
+        genome = get_human_22_fake_genome()
+        lane = mbf_align.AlignedSample(
+            "test_lane",
+            get_sample_data(Path("mbf_align/rnaseq_spliced_chr22.bam")),
+            genome,
+            False,
+            "AA123",
+        )  # index creation is automatic
+        genes = Genes(genome)
+        pc = genes.filter("protein_coding", lambda df: df.biotype == "protein_coding")
+        raw = anno_tag_counts.ExonSmartStranded(lane)
+        tpm = anno_tag_counts.NormalizationTPM(raw)
+        pc.add_annotator(tpm)
+        pc.write()
+        ppg.run_pipegraph()
+        assert pc.df[tpm.columns[0]].sum() == pytest.approx(1e6)
+        assert not raw.columns[0] in genes.df.columns
+        with_filtered = pc.df[tpm.columns[0]]
+
+        new_pipegraph_no_qc.new_pipegraph()
+        disable_qc()
+        genome = get_human_22_fake_genome()
+        lane = mbf_align.AlignedSample(
+            "test_lane",
+            get_sample_data(Path("mbf_align/rnaseq_spliced_chr22.bam")),
+            genome,
+            False,
+            "AA123",
+        )  # index creation is automatic
+
+        genes = Genes(genome)
+        pc = genes.filter("protein_coding2", lambda df: df.biotype == "protein_coding")
+        raw = anno_tag_counts.ExonSmartStranded(lane)
+
+        class RawToNanOnBiotype(Annotator):
+            def __init__(self):
+                self.columns = ["Rawww"]
+                self.genome = genome
+                self.interval_strategy = raw.interval_strategy
+
+            def calc(self, df):
+                column = df[raw.columns[0]].copy()
+                column[df["biotype"] != "protein_coding"] = np.nan
+                return column
+
+            def dep_annos(self):
+                return [raw]
+
+        tpm = anno_tag_counts.NormalizationTPM(RawToNanOnBiotype())
+        genes.add_annotator(tpm)
+        pc.write()
+        ppg.run_pipegraph()
+        assert (pc.df[tpm.columns[0]] == with_filtered).all()
+
 
 @pytest.mark.usefixtures("new_pipegraph")
 class TestQC:
@@ -1393,7 +1456,7 @@ class TestQC:
             anno = anno_tag_counts.NormalizationCPM(x)
             ddf += anno
             annos.append(anno)
-        ddf2 = ddf.filter('filtered', lambda df: df[anno.columns[0]] >= 100, [anno])
+        ddf2 = ddf.filter("filtered", lambda df: df[anno.columns[0]] >= 100, [anno])
         ddf2.write()
         prune_qc(lambda job: "pca" in job.job_id)
         run_pipegraph()
@@ -1401,7 +1464,7 @@ class TestQC:
         qc_jobs = [x for x in qc_jobs if not x._pruned]
         assert len(qc_jobs) == 2
         assert_image_equal(qc_jobs[0].filenames[0])
-        assert_image_equal(qc_jobs[1].filenames[0], '_filtered')
+        assert_image_equal(qc_jobs[1].filenames[0], "_filtered")
 
     def test_qc_pca_single_sample(self):
         import mbf_sampledata

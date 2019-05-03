@@ -640,7 +640,12 @@ class Load_PPG:
                 node.add_annotator(anno)
                 for c in node.ddf.children:
                     c.load_strategy.add_annotator(anno)
-                    descend_and_add_annos(c.load_strategy)
+            for (
+                c
+            ) in (
+                node.ddf.children
+            ):  # they might have annos that the parent did not have
+                descend_and_add_annos(c.load_strategy)
 
         def descend_and_jobify(node):
             for anno in node.ddf.annotators.values():

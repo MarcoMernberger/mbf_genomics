@@ -410,8 +410,8 @@ class _NormalizationAnno(Annotator, TagCountCommonQC):
         self.raw_column = parse_a_or_c_to_column(base_column_spec)
         if self.raw_anno is not None:
             self.genome = self.raw_anno.genome
-            self.vid = self.raw_anno.vid
-            self.aligned_lane = self.raw_anno.aligned_lane
+            self.vid = getattr(self.raw_anno, 'vid', None)
+            self.aligned_lane = getattr(self.raw_anno, 'aligned_lane', None)
         else:
             self.genome = None
             self.vid = None
@@ -423,8 +423,11 @@ class _NormalizationAnno(Annotator, TagCountCommonQC):
             + hashlib.md5(self.columns[0].encode("utf-8")).hexdigest()
         )
         if self.raw_anno is not None:
-            self.plot_name = self.raw_anno.plot_name
-            self.qc_folder = f"normalized_{self.name}_{self.raw_anno.count_strategy.name}_{self.raw_anno.interval_strategy.name}"
+            self.plot_name = getattr(self.raw_anno, 'plot_name', self.raw_column)
+            if hasattr(self.raw_anno, 'count_strategy'):
+                self.qc_folder = f"normalized_{self.name}_{self.raw_anno.count_strategy.name}_{self.raw_anno.interval_strategy.name}"
+            else:
+                self.qc_folder = f"normalized_{self.name}"
         else:
             self.plot_name = self.raw_column
             self.qc_folder = f"normalized_{self.name}"
@@ -486,8 +489,8 @@ class NormalizationTPM(_NormalizationAnno):
         )
         result = np.zeros(raw_counts.shape, float)
         for ii, gene_stable_id in enumerate(df["gene_stable_id"]):
-            result[ii] = raw_counts[ii] / float(length_by_gene[gene_stable_id])
-        total = float(result.sum())
+            result[ii] = raw_counts.iloc[ii] / length_by_gene[gene_stable_id]
+        total = float(result[~pd.isnull(result)].sum())
         factor = 1e6 / total
         result = result * factor
         return pd.DataFrame({self.columns[0]: result})
