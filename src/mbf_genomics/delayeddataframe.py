@@ -205,7 +205,7 @@ class DelayedDataFrame(object):
         Create a filter function from a tuple of
         (column_definition, operator, threshold)
 
-        Operators are strings '>', '<', '==', '>=', '<=',
+        Operators are strings '>', '<', '==', '>=', '<=', 'isin'
         They may be prefixed by '|' which means 'take absolute first'
 
         Example:
@@ -329,6 +329,10 @@ class DelayedDataFrame(object):
                     ].abs()
                     <= threshold
                 )  # noqa: E03
+            elif op == "isin":
+                f = lambda df, column_name=column_name, chosen_set=threshold: df[
+                    column_name
+                ].isin(set(chosen_set))
             else:
                 raise ValueError(f"invalid operator {op}")
             functors.append(f)
