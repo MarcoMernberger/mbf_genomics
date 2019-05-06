@@ -374,6 +374,8 @@ class DelayedDataFrame(object):
         """Job: Store the internal DataFrame (df) in a table.
         To sort, filter, remove columns, etc before output,
         pass in a mangler_function (takes df, returns df)
+
+        Retruns a (Job, Path) tuple - job is None if outside ppg
         """
         output_filename = self.pathify(
             output_filename, self.get_table_filename().absolute()
@@ -471,7 +473,7 @@ class Load_Direct:
 
     def generate_file(self, filename, write_callback, dependencies, empty_ok=False):
         write_callback(filename)
-        return Path(filename)
+        return None, Path(filename)
 
     def add_annotator(self, anno):
         if anno.get_cache_name() in self.ddf.annotators:
@@ -483,7 +485,8 @@ class Load_Direct:
             return
         self.ddf.annotators[anno.get_cache_name()] = anno
         for d in anno.dep_annos():
-            self.ddf += d
+            if d is not None:
+                self.ddf += d
         s_should = set(anno.columns)
         if not s_should:
             raise IndexError("Empty columns")
@@ -595,7 +598,8 @@ class Load_PPG:
         return (
             ppg.FileGeneratingJob(filename, write_callback, empty_ok=empty_ok)
             .depends_on(dependencies)
-            .depends_on(self.load())
+            .depends_on(self.load()),
+            Path(filename),
         )
 
     def get_anno_dependency_callback(self, anno):
@@ -619,9 +623,9 @@ class Load_PPG:
 
         def recursivly_add_annos(deps, a):
             new = a.dep_annos()
-            if None in new:  # pragma: no cover
-                raise ValueError("None returned in %s.dep_annos" % a)
             for n in new:
+                if n is None:
+                    continue
                 if n not in deps:
                     recursivly_add_annos(deps, n)
                     deps.add(n)

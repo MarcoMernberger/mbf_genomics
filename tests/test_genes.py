@@ -815,10 +815,7 @@ class TestGenes:
         )
         g = genes.Genes(genome, sheet_name="da_genes")
         assert "/da_genes/" in str(g.result_dir)
-        if ppg.util.inside_ppg():
-            sample_filename = g.write_bed().job_id  # the jobs output filename
-        else:
-            sample_filename = g.write_bed()  # the jobs output filename
+        sample_filename = g.write_bed()[1]
         run_pipegraph()
         assert len(g.df) > 0
         read = read_bed(sample_filename)
@@ -858,14 +855,10 @@ class TestGenes:
             with pytest.raises(ValueError):
                 g.write("c.xls", lambda df: df.tail())
         run_pipegraph()
-        if ppg.util.inside_ppg():
-            afn = a.job_id
-            bfn = b.job_id
-            cfn = c.job_id
-        else:
-            afn = a
-            bfn = b
-            cfn = c
+        afn = a[1]
+        bfn = b[1]
+        cfn = c[1]
+
         assert Path(afn).exists()
         assert Path(bfn).exists()
         assert Path(cfn).exists()
