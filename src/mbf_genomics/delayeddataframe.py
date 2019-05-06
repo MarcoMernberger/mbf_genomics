@@ -332,7 +332,9 @@ class DelayedDataFrame(object):
             elif op == "isin":
                 f = lambda df, column_name=column_name, chosen_set=threshold: df[
                     column_name
-                ].isin(set(chosen_set))
+                ].isin(
+                    set(chosen_set)
+                )  # noqa: E03
             else:
                 raise ValueError(f"invalid operator {op}")
             functors.append(f)
@@ -755,7 +757,8 @@ class Load_PPG:
             ),
         )
         for d in anno.dep_annos():
-            job.depends_on(self.ddf.anno_jobs[d.get_cache_name()])
+            if d is not None:
+                job.depends_on(self.ddf.anno_jobs[d.get_cache_name()])
         job.depends_on(anno.deps(self.ddf))
         job.lfg.cores_needed = getattr(anno, "cores_needed", 1)
         return job

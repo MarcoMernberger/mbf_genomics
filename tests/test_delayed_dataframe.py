@@ -309,6 +309,33 @@ class Test_DelayedDataFrameDirect:
         assert "aa" in a.df.columns
         assert (a.df["ab"] == (a.df["aa"] + "b")).all()
 
+    def test_annos_dependening_none(self):
+        class A(Annotator):
+            cache_name = "hello"
+            columns = ["aa"]
+
+            def calc(self, df):
+                return pd.DataFrame({self.columns[0]: "a"}, index=df.index)
+
+        class B(Annotator):
+            cache_name = "hello2"
+            columns = ["ab"]
+
+            def calc(self, df):
+                return df["aa"] + "b"
+
+            def dep_annos(self):
+                return [None, A(), None]
+
+        a = DelayedDataFrame(
+            "shu", lambda: pd.DataFrame({"A": [1, 2], "B": ["c", "d"]})
+        )
+        a += B()
+        a.annotate()
+        assert "ab" in a.df.columns
+        assert "aa" in a.df.columns
+        assert (a.df["ab"] == (a.df["aa"] + "b")).all()
+
     def test_filtering(self):
         class A(Annotator):
             cache_name = "A"
