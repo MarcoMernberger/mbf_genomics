@@ -849,10 +849,10 @@ class TestGenomicRegionsLoading:
         )
         fn = "results/GenomicRegions/shu/shu.png"
         if inside_ppg():
-            assert isinstance(pj, ppg.FileGeneratingJob)
-            assert Path(pj.filenames[0]).absolute() == Path(fn).absolute()
+            assert isinstance(pj[0], ppg.FileGeneratingJob)
+            assert pj[1].absolute() == Path(fn).absolute()
         else:
-            assert str(pj) == str(Path(fn).absolute())
+            assert str(pj[1]) == str(Path(fn).absolute())
         run_pipegraph()
         assert_image_equal(fn)
 
@@ -882,10 +882,10 @@ class TestGenomicRegionsLoading:
         )
         fn = str(Path("shu.png").absolute())
         if inside_ppg():
-            assert isinstance(pj, ppg.FileGeneratingJob)
-            assert str(Path(pj.filenames[0]).absolute()) == fn
+            assert isinstance(pj[0], ppg.FileGeneratingJob)
+            assert str(pj[1].absolute()) == fn
         else:
-            assert str(pj) == fn
+            assert str(pj[1]) == fn
         run_pipegraph()
         assert_image_equal(fn)
 
@@ -1128,10 +1128,11 @@ class TestGenomicRegionsWriting:
         pj = self.a.plot("shu.png", lambda df: dp(df).p9().add_scatter("start", "stop"))
         fn = "results/GenomicRegions/shu/shu.png"
         if inside_ppg():
-            assert isinstance(pj, ppg.FileGeneratingJob)
-            assert Path(pj.filenames[0]).absolute() == Path(fn).absolute()
+            assert isinstance(pj[0], ppg.FileGeneratingJob)
+            assert Path(pj[0].filenames[0]).absolute() == Path(fn).absolute()
+            assert Path(pj[1]).absolute() == Path(fn).absolute()
         else:
-            assert str(pj) == str(Path(fn).absolute())
+            assert str(pj[1]) == str(Path(fn).absolute())
         run_pipegraph()
         assert_image_equal(fn)
 

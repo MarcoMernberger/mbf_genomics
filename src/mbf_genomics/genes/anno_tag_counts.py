@@ -204,7 +204,7 @@ class TagCountCommonQC:
                 )
                 .turn_x_axis_labels()
                 .hide_x_axis_title()
-                .render(output_filename)
+                .render(output_filename, width=0.2 * len(elements) + 1, height=4)
             )
 
         return register_qc(
@@ -313,7 +313,7 @@ class _FastTagCounter(Annotator, TagCountCommonQC):
         cf.mkdir(exist_ok=True)
         return ppg.CachedAttributeLoadingJob(
             cf / self.cache_name, self, "_data", self.calc_data
-        ).depends_on(self.aligned_lane.load())
+        ).depends_on(self.aligned_lane.load()).use_cores(-1)
 
 
 # ## Raw tag count annos for analysis usage

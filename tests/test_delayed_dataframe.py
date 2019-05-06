@@ -50,9 +50,9 @@ class Test_DelayedDataFrameDirect:
         assert Path("sha").exists()
         assert_frame_equal(a.df, test_df)
         assert a.non_annotator_columns == "A"
-        fn = a.write()
+        fn = a.write()[1]
         assert "/sha" in str(fn.parent)
-        assert Path(fn).exists()
+        assert fn.exists()
         assert_frame_equal(pd.read_csv(fn, sep="\t"), test_df)
 
     def test_write_excel(self):
@@ -65,8 +65,8 @@ class Test_DelayedDataFrameDirect:
         assert Path("sha").exists()
         assert_frame_equal(a.df, test_df)
         assert a.non_annotator_columns == "A"
-        fn = a.write("sha.xls")
-        assert Path(fn).exists()
+        fn = a.write("sha.xls")[1]
+        assert fn.exists()
         assert_frame_equal(pd.read_excel(fn), test_df)
 
     def test_write_excel2(self):
@@ -81,8 +81,8 @@ class Test_DelayedDataFrameDirect:
             return test_df
 
         a = DelayedDataFrame("shu", load, result_dir="sha")
-        fn = a.write("sha.xls")
-        assert Path(fn).exists()
+        fn = a.write("sha.xls")[1]
+        assert fn.exists()
         assert_frame_equal(pd.read_csv(fn, sep="\t"), test_df)
 
     def test_write_mangle(self):
@@ -100,8 +100,8 @@ class Test_DelayedDataFrameDirect:
             df = df[df.B == "c"]
             return df
 
-        fn = a.write("test.csv", mangle)
-        assert Path(fn).exists()
+        fn = a.write("test.csv", mangle)[1]
+        assert fn.exists()
         assert_frame_equal(pd.read_csv(fn, sep="\t"), mangle(test_df))
 
     def test_magic(self):
@@ -626,7 +626,7 @@ class Test_DelayedDataFramePPG:
             return test_df
 
         a = DelayedDataFrame("shu", load)
-        fn = a.write()
+        fn = a.write()[0]
         ppg.run_pipegraph()
         assert Path(fn.filenames[0]).exists()
         assert_frame_equal(pd.read_csv(fn.filenames[0], sep="\t"), test_df)
@@ -707,6 +707,9 @@ class Test_DelayedDataFramePPG:
             def calc(self, df):
                 return pd.DataFrame({"shu": [1, 2]})
 
+            def __repr__(self):
+                return "EmptyColumNames()"
+
         a += EmptyColumnNames()
         force_load(a.annotate())
         anno_job_cb = a.anno_jobs[EmptyColumnNames().get_cache_name()]
@@ -725,6 +728,9 @@ class Test_DelayedDataFramePPG:
 
             def calc(self, df):
                 return pd.DataFrame({})
+
+            def __repr__(self):
+                return "MissingColumnNames()"
 
         a += MissingColumnNames()
         lg = a.anno_jobs["MissingColumnNames"]
@@ -857,7 +863,7 @@ class Test_DelayedDataFramePPG:
         with pytest.raises(ValueError):
             b.clone_without_annotators("shc", "hello")
         c = b.clone_without_annotators("shc", result_dir="dir_c")
-        fn = c.write().job_id
+        fn = c.write()[1]
         ppg.run_pipegraph()
         assert "C" in a.df
         assert "C" in b.df

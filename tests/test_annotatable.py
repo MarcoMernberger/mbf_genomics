@@ -329,7 +329,7 @@ class Test_FromOldGenomics:
         third = second.filter("third", lambda df: (df["shu"] == "i"), annotators=[anno])
         fourth = first.filter("fourth", lambda df: ([False, True]))
         second.write()
-        fn_4 = fourth.write().job_id
+        fn_4 = fourth.write()[1]
         a.add_annotator(anno2)
         fourth.add_annotator(anno2)
         force_load(first)
