@@ -11,6 +11,7 @@ import pandas as pd
 from pathlib import Path
 from dppd import dppd
 from mbf_qualitycontrol import register_qc, QCCollectingJob, qc_disabled
+from mbf_genomics.util import parse_a_or_c_to_plot_name
 
 dp, X = dppd()
 
@@ -311,9 +312,13 @@ class _FastTagCounter(Annotator, TagCountCommonQC):
     def load_data(self):
         cf = Path(ppg.util.global_pipegraph.cache_folder) / "FastTagCounters"
         cf.mkdir(exist_ok=True)
-        return ppg.CachedAttributeLoadingJob(
-            cf / self.cache_name, self, "_data", self.calc_data
-        ).depends_on(self.aligned_lane.load()).use_cores(-1)
+        return (
+            ppg.CachedAttributeLoadingJob(
+                cf / self.cache_name, self, "_data", self.calc_data
+            )
+            .depends_on(self.aligned_lane.load())
+            .use_cores(-1)
+        )
 
 
 # ## Raw tag count annos for analysis usage
@@ -410,8 +415,8 @@ class _NormalizationAnno(Annotator, TagCountCommonQC):
         self.raw_column = parse_a_or_c_to_column(base_column_spec)
         if self.raw_anno is not None:
             self.genome = self.raw_anno.genome
-            self.vid = getattr(self.raw_anno, 'vid', None)
-            self.aligned_lane = getattr(self.raw_anno, 'aligned_lane', None)
+            self.vid = getattr(self.raw_anno, "vid", None)
+            self.aligned_lane = getattr(self.raw_anno, "aligned_lane", None)
         else:
             self.genome = None
             self.vid = None
@@ -423,13 +428,15 @@ class _NormalizationAnno(Annotator, TagCountCommonQC):
             + hashlib.md5(self.columns[0].encode("utf-8")).hexdigest()
         )
         if self.raw_anno is not None:
-            self.plot_name = getattr(self.raw_anno, 'plot_name', self.raw_column)
-            if hasattr(self.raw_anno, 'count_strategy'):
+            self.plot_name = getattr(self.raw_anno, "plot_name", self.raw_column)
+            if hasattr(self.raw_anno, "count_strategy"):
                 self.qc_folder = f"normalized_{self.name}_{self.raw_anno.count_strategy.name}_{self.raw_anno.interval_strategy.name}"
             else:
                 self.qc_folder = f"normalized_{self.name}"
         else:
-            self.plot_name = self.raw_column
+            self.plot_name = parse_a_or_c_to_plot_name(
+                self.raw_anno, self.raw_anno.columns[0]
+            )
             self.qc_folder = f"normalized_{self.name}"
         self.qc_distribution_scale_y_name = self.name
 
