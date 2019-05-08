@@ -477,8 +477,6 @@ class GenomicRegions(DelayedDataFrame):
         """Store the intervals of the GenomicRegion in a big bed file"""
         from mbf_fileformats.bed import BedEntry, write_bigbed
 
-        raise ValueError("track this")
-
         output_filename = self.pathify(output_filename, self.name + ".bigbed")
 
         def write(output_filename=output_filename):

@@ -330,11 +330,11 @@ class DelayedDataFrame(object):
                     <= threshold
                 )  # noqa: E03
             elif op == "isin":
-                f = lambda df, column_name=column_name, chosen_set=threshold: df[
+                f = lambda df, column_name=column_name, chosen_set=threshold: df[  # noqa: E03
                     column_name
                 ].isin(
                     set(chosen_set)
-                )  # noqa: E03
+                )
             else:
                 raise ValueError(f"invalid operator {op}")
             functors.append(f)
