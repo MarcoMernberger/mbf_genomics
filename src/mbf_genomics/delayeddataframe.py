@@ -330,7 +330,7 @@ class DelayedDataFrame(object):
                     <= threshold
                 )  # noqa: E03
             elif op == "isin":
-                f = lambda df, column_name=column_name, chosen_set=threshold: df[  # noqa: E03
+                f = lambda df, column_name=column_name, chosen_set=threshold: df[  # noqa: E731
                     column_name
                 ].isin(
                     set(chosen_set)

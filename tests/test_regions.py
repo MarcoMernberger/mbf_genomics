@@ -986,7 +986,7 @@ class TestGenomicRegionsWriting:
                     "stop": [11, 110, 1110, 11110, 111_110],
                     "name": ["a", "b", "c", "d", "e"],
                     "notname": ["A", "B", "C", "D", "E"],
-                    'strand': [1, 1, 1, 1, -1],
+                    "strand": [1, 1, 1, 1, -1],
                 }
             )
 
@@ -1071,7 +1071,9 @@ class TestGenomicRegionsWriting:
         assert (read["start"] == should["start"]).all()
         assert (read["stop"] == should["stop"]).all()
         assert (read["strand"] == should["strand"]).all()
-        assert (read["name"].str.upper() == should["name"].str.upper()).all() # bigbed seems to store uprcse names?
+        assert (
+            read["name"].str.upper() == should["name"].str.upper()
+        ).all()  # bigbed seems to store uprcse names?
 
     def test_write_bigbed(self):
         self.setUp()
