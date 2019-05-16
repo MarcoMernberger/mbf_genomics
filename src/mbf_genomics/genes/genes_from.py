@@ -206,3 +206,48 @@ def Genes_FromBiotypes(genome, allowed_biotypes):
         return ok
 
     return Genes(genome).filter("Genes_with_%s" % ",".join(allowed_biotypes), filter)
+
+
+def Genes_FromNames(name, genome, list_or_callback, sheet_name=None, vid=None, manual_lookup = None):
+    """Filter Genes(genome) to those occuring in the list (or the list 
+    returned from the callback.
+
+    If manual_lookup is set, genes will be first replaced with those before lookup 
+    in the genome. Entries resolving to none will be excluded.
+    Manual lookup may contain unused entries
+    
+    """
+
+    def filter(genes_df, manual_lookup =manual_lookup):
+        if hasattr(list_or_callback, "__call__"):
+            l = list_or_callback()
+        else:
+            l = list_or_callback
+        if manual_lookup is not None:
+            manual_lookup = {k.upper(): v.upper() if v is not None else None for (k,v) in manual_lookup.items()}
+            l = [manual_lookup.get(x.upper(), x.upper()) for x in l]
+            l = [x for x in l if x is not None]
+
+        seen = set([x.upper() for x in l])
+        unused = seen.difference(genes_df["name"].str.upper())
+        if unused:
+            raise ValueError(
+                "the following gene names were not found in the genome:\n"
+                + "\n".join(sorted(unused))
+            )
+        return np.array(
+            [str(x).upper() in seen for x in genes_df["name"]], dtype=np.bool
+        )
+
+    g = Genes(genome)
+    if g.load_strategy.build_deps:
+        if hasattr(list_or_callback, "__call__"):
+            deps = [ppg.FunctionInvariant(name + "_list_or_callback", list_or_callback)]
+        else:
+            deps = [
+                ppg.ParameterInvariant(name + "_list_or_callback", list_or_callback)
+            ]
+    else:
+        deps = []
+
+    return g.filter(name, filter, dependencies=deps, sheet_name=sheet_name, vid=vid)

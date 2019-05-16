@@ -146,6 +146,13 @@ class Genes(GenomicRegions):
             self._already_inited = True
             self.vid = vid
 
+    def __str__(self):
+        return "Genes(%s)" % self.name
+
+    def __repr__(self):
+        return "Genes(%s)" % self.name
+
+    
     def register(self):
         pass
 
