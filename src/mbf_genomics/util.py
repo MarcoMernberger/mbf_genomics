@@ -92,7 +92,7 @@ def parse_a_or_c_to_anno(k):
     return parse_a_or_c(k)[0]
 
 
-def parse_a_or_c_to_plot_name(k):
+def parse_a_or_c_to_plot_name(k, default=None):
     """Parse an annotator + column spec to a plot name
     See parse_a_or_c_to_column
 
@@ -102,7 +102,7 @@ def parse_a_or_c_to_plot_name(k):
     ac = parse_a_or_c(k)
     if ac[0] is None:
         return k
-    return getattr(ac[0], "plot_name", ac[1])
+    return getattr(ac[0], "plot_name", default if default is not None else ac[1])
 
 
 def find_annos_from_column(k):
