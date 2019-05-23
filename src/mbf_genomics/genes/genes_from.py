@@ -1,7 +1,7 @@
 import numpy as np
 import pypipegraph as ppg
 from .genes import Genes
-from ..util import read_pandas
+from ..util import read_pandas, freeze
 
 
 def Genes_FromDifference(name, a, b, sheet_name="Differences"):
@@ -208,7 +208,15 @@ def Genes_FromBiotypes(genome, allowed_biotypes):
     return Genes(genome).filter("Genes_with_%s" % ",".join(allowed_biotypes), filter)
 
 
-def Genes_FromNames(name, genome, list_or_callback, sheet_name=None, vid=None, manual_lookup = None):
+def Genes_FromNames(
+    name,
+    genome,
+    list_or_callback,
+    sheet_name=None,
+    vid=None,
+    manual_lookup=None,
+    ignore_unmatched=False,
+):
     """Filter Genes(genome) to those occuring in the list (or the list 
     returned from the callback.
 
@@ -218,26 +226,33 @@ def Genes_FromNames(name, genome, list_or_callback, sheet_name=None, vid=None, m
     
     """
 
-    def filter(genes_df, manual_lookup =manual_lookup):
+    def filter(genes_df, manual_lookup=manual_lookup):
         if hasattr(list_or_callback, "__call__"):
             l = list_or_callback()
         else:
             l = list_or_callback
         if manual_lookup is not None:
-            manual_lookup = {k.upper(): v.upper() if v is not None else None for (k,v) in manual_lookup.items()}
+            manual_lookup = {
+                k.upper(): v.upper() if v is not None else None
+                for (k, v) in manual_lookup.items()
+            }
             l = [manual_lookup.get(x.upper(), x.upper()) for x in l]
             l = [x for x in l if x is not None]
 
-        seen = set([x.upper() for x in l])
+        stable_ids = set(genes_df["gene_stable_id"])
+        ids_seen = [x for x in l if x in stable_ids]
+        names = [x for x in l if x not in stable_ids]
+        seen = set([x.upper() for x in names])
         unused = seen.difference(genes_df["name"].str.upper())
-        if unused:
+        if unused and not ignore_unmatched:
             raise ValueError(
                 "the following gene names were not found in the genome:\n"
                 + "\n".join(sorted(unused))
             )
-        return np.array(
-            [str(x).upper() in seen for x in genes_df["name"]], dtype=np.bool
-        )
+        res = np.zeros(len(genes_df), bool)
+        res |= genes_df["gene_stable_id"].isin(ids_seen)
+        res |= genes_df["name"].str.upper().isin(seen)
+        return res
 
     g = Genes(genome)
     if g.load_strategy.build_deps:
@@ -247,6 +262,9 @@ def Genes_FromNames(name, genome, list_or_callback, sheet_name=None, vid=None, m
             deps = [
                 ppg.ParameterInvariant(name + "_list_or_callback", list_or_callback)
             ]
+        deps.append(
+            ppg.ParameterInvariant(name + "_manual_lookup", freeze(manual_lookup))
+        )
     else:
         deps = []
 
