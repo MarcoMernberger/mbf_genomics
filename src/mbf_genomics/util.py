@@ -1,6 +1,4 @@
 import pandas as pd
-from frozendict import frozendict
-
 
 def read_pandas(filename):
     filename = str(filename)
@@ -27,24 +25,8 @@ def freeze(obj):
         into frozensets, recursively - usefull
         to get a hash value..
     """
-
-    try:
-        hash(obj)
-        return obj
-    except TypeError:
-        pass
-
-    if isinstance(obj, dict):
-        frz = {k: freeze(obj[k]) for k in obj}
-        return frozendict(frz)
-    elif isinstance(obj, (list, tuple)):
-        return tuple([freeze(x) for x in obj])
-
-    elif isinstance(obj, set):
-        return frozenset(obj)
-    else:
-        msg = "Unsupported type: %r" % type(obj).__name__
-        raise TypeError(msg)
+    # TODO: combine with ppg.util.freeze
+    return ppg.util.freeze(obj)
 
 
 def parse_a_or_c(ac):
