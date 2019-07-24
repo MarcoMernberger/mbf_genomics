@@ -1,4 +1,5 @@
 import pandas as pd
+import pypipegraph as ppg
 
 def read_pandas(filename):
     filename = str(filename)
