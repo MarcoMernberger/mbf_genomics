@@ -4,7 +4,7 @@ from .genes import Genes
 from ..util import read_pandas, freeze
 
 
-def Genes_FromDifference(name, a, b, sheet_name="Differences"):
+def FromDifference(name, a, b, sheet_name="Differences"):
 
     """a minus b"""
 
@@ -38,10 +38,10 @@ def Genes_FromDifference(name, a, b, sheet_name="Differences"):
     return res
 
 
-def Genes_FromIntersection(name, gene_sets, sheet_name="Intersections"):
+def FromIntersection(name, gene_sets, sheet_name="Intersections"):
     if not isinstance(sheet_name, str):
         raise ValueError(
-            "sheet name must be string - note that Genes_FromIntersection"
+            "sheet name must be string - note that FromIntersection"
             "takes a list of genes as 2nd parameter"
         )
     parents = []
@@ -98,7 +98,7 @@ def _from_filtered_genes(name, do_filter, genes_sets, sheet_name, vid):
     )
 
 
-def Genes_FromAny(name, genes_sets, sheet_name=None):
+def FromAny(name, genes_sets, sheet_name=None):
     def do_filter(df):
         seen = set()
         for o in genes_sets:
@@ -114,7 +114,7 @@ def Genes_FromAny(name, genes_sets, sheet_name=None):
     )
 
 
-def Genes_FromAll(name, genes_sets, sheet_name=None):
+def FromAll(name, genes_sets, sheet_name=None):
     # def filter_to_those_occuring_in_all_filtered_sets(
     def do_filter(df):
         ok = set.intersection(
@@ -131,7 +131,7 @@ def Genes_FromAll(name, genes_sets, sheet_name=None):
     )
 
 
-def Genes_FromNone(name, genes_sets, sheet_name=None):
+def FromNone(name, genes_sets, sheet_name=None):
     # def filter_to_those_not_occuring_in_any_filtered_sets(
     def do_filter(df):
         seen = set()
@@ -152,7 +152,7 @@ def Genes_FromNone(name, genes_sets, sheet_name=None):
     )
 
 
-def Genes_FromFile(
+def FromFile(
     name, genome, table_filename, column_name="gene_stable_id", sheet_name=None
 ):
     """Filter Genes(genome) to those occuring in the table_filename"""
@@ -176,7 +176,7 @@ def Genes_FromFile(
     return g.filter(name, filter, dependencies=deps, sheet_name=sheet_name)
 
 
-def Genes_FromFileOfTranscripts(
+def FromFileOfTranscripts(
     name, genome, table_filename, column_name="transcript_stable_id"
 ):
     """Filter Genes(genome) to those whose transcripts occur in the table_filename"""
@@ -198,7 +198,7 @@ def Genes_FromFileOfTranscripts(
     return g.filter(name, filter, dependencies=deps)
 
 
-def Genes_FromBiotypes(genome, allowed_biotypes):
+def FromBiotypes(genome, allowed_biotypes):
     def filter(genes_df):
         ok = np.zeros(genes_df.shape[0], dtype=np.bool)
         for x in allowed_biotypes:
@@ -208,7 +208,7 @@ def Genes_FromBiotypes(genome, allowed_biotypes):
     return Genes(genome).filter("Genes_with_%s" % ",".join(allowed_biotypes), filter)
 
 
-def Genes_FromNames(
+def FromNames(
     name,
     genome,
     list_or_callback,
