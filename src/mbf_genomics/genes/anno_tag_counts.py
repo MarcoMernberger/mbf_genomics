@@ -434,9 +434,7 @@ class _NormalizationAnno(Annotator, TagCountCommonQC):
             else:
                 self.qc_folder = f"normalized_{self.name}"
         else:
-            self.plot_name = parse_a_or_c_to_plot_name(
-                base_column_spec
-            )
+            self.plot_name = parse_a_or_c_to_plot_name(base_column_spec)
             self.qc_folder = f"normalized_{self.name}"
         self.qc_distribution_scale_y_name = self.name
 

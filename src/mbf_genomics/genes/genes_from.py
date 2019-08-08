@@ -217,31 +217,31 @@ def Genes_FromNames(
     manual_lookup=None,
     ignore_unmatched=False,
 ):
-    """Filter Genes(genome) to those occuring in the list (or the list 
+    """Filter Genes(genome) to those occuring in the list (or the list
     returned from the callback.
 
-    If manual_lookup is set, genes will be first replaced with those before lookup 
+    If manual_lookup is set, genes will be first replaced with those before lookup
     in the genome. Entries resolving to none will be excluded.
     Manual lookup may contain unused entries
-    
+
     """
 
     def filter(genes_df, manual_lookup=manual_lookup):
         if hasattr(list_or_callback, "__call__"):
-            l = list_or_callback()
+            ll = list_or_callback()
         else:
-            l = list_or_callback
+            ll = list_or_callback
         if manual_lookup is not None:
             manual_lookup = {
                 k.upper(): v.upper() if v is not None else None
                 for (k, v) in manual_lookup.items()
             }
-            l = [manual_lookup.get(x.upper(), x.upper()) for x in l]
-            l = [x for x in l if x is not None]
+            ll = [manual_lookup.get(x.upper(), x.upper()) for x in ll]
+            ll = [x for x in ll if x is not None]
 
         stable_ids = set(genes_df["gene_stable_id"])
-        ids_seen = [x for x in l if x in stable_ids]
-        names = [x for x in l if x not in stable_ids]
+        ids_seen = [x for x in ll if x in stable_ids]
+        names = [x for x in ll if x not in stable_ids]
         seen = set([x.upper() for x in names])
         unused = seen.difference(genes_df["name"].str.upper())
         if unused and not ignore_unmatched:

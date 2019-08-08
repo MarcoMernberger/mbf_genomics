@@ -152,7 +152,6 @@ class Genes(GenomicRegions):
     def __repr__(self):
         return "Genes(%s)" % self.name
 
-    
     def register(self):
         pass
 
