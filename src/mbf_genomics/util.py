@@ -26,6 +26,7 @@ def freeze(obj):
         to get a hash value..
     """
     # TODO: combine with ppg.util.freeze
+    import pypipegraph as ppg
     return ppg.util.freeze(obj)
 
 
