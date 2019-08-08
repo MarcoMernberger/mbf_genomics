@@ -52,10 +52,10 @@ class CounterStrategyStrandedRust(_CounterStrategyBase):
         res = count_reads_stranded(
             bam_filename, bam_index_name, intervals, gene_intervals
         )
-        self.sanity_check(res)
+        self.sanity_check(res, bam_filename)
         return res
 
-    def sanity_check(self, foward_and_reverse):
+    def sanity_check(self, foward_and_reverse, bam_filename):
         if self.disable_sanity_check:
             return
         error_count = 0
@@ -68,9 +68,9 @@ class CounterStrategyStrandedRust(_CounterStrategyBase):
             raise ValueError(
                 "Found at least %.2f%% of genes to have a reverse read count (%s) "
                 "above 110%% of the exon read count (and at least 100 tags). "
-                "This indicates that this lane should have been reversed before alignment. "
+                "This indicates that this lane (%s) should have been reversed before alignment. "
                 "Set reverse_reads=True on your Lane object"
-                % (100.0 * error_count / len(forward), self.__class__.__name__)
+                % (100.0 * error_count / len(forward), self.__class__.__name__, bam_filename)
             )
 
     def extract_lookup(self, data):
@@ -434,9 +434,7 @@ class _NormalizationAnno(Annotator, TagCountCommonQC):
             else:
                 self.qc_folder = f"normalized_{self.name}"
         else:
-            self.plot_name = parse_a_or_c_to_plot_name(
-                base_column_spec
-            )
+            self.plot_name = parse_a_or_c_to_plot_name(base_column_spec)
             self.qc_folder = f"normalized_{self.name}"
         self.qc_distribution_scale_y_name = self.name
 

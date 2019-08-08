@@ -1,7 +1,9 @@
 from mbf_genomes import HardCodedGenome
 
 
-def MockGenome(df_genes, df_transcripts=None, chr_lengths=None, df_genes_meta=None):  # noqa: C901
+def MockGenome(  # noqa: C901
+    df_genes, df_transcripts=None, chr_lengths=None, df_genes_meta=None
+):  # noqa: C901
     if chr_lengths is None:
         chr_lengths = {
             "1": 100_000,
