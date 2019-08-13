@@ -70,7 +70,11 @@ class CounterStrategyStrandedRust(_CounterStrategyBase):
                 "above 110%% of the exon read count (and at least 100 tags). "
                 "This indicates that this lane (%s) should have been reversed before alignment. "
                 "Set reverse_reads=True on your Lane object"
-                % (100.0 * error_count / len(forward), self.__class__.__name__, bam_filename)
+                % (
+                    100.0 * error_count / len(forward),
+                    self.__class__.__name__,
+                    bam_filename,
+                )
             )
 
     def extract_lookup(self, data):
@@ -189,15 +193,19 @@ class TagCountCommonQC:
 
         def plot(output_filename, elements):
             df = genes.df
-            return (
+            df = dp(df).select({x.aligned_lane.name: x.columns[0] for x in elements}).pd
+            plot = (
                 dp(df)
-                .select({x.aligned_lane.name: x.columns[0] for x in elements})
                 .melt(var_name="sample", value_name="count")
                 .p9()
                 .theme_bw()
                 .annotation_stripes()
-                .geom_violin(dp.aes("sample", "count"), width=0.5)
-                .add_boxplot(
+            )
+            if ((df > 0).sum(axis=0) > 1).any():
+                plot = plot.geom_violin(dp.aes("sample", "count"), width=0.5)
+
+            return (
+                plot.add_boxplot(
                     x="sample", y="count", _width=0.1, _fill=None, _color="blue"
                 )
                 .scale_y_continuous(
