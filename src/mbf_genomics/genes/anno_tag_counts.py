@@ -186,6 +186,7 @@ class TagCountCommonQC:
         if not qc_disabled():
             self.register_qc_distribution(genes)
             self.register_qc_pca(genes)
+            #self.register_qc_cummulative(genes)
 
     def register_qc_distribution(self, genes):
         output_filename = genes.result_dir / self.qc_folder / f"read_distribution.png"
@@ -209,7 +210,8 @@ class TagCountCommonQC:
                     x="sample", y="count", _width=0.1, _fill=None, _color="blue"
                 )
                 .scale_y_continuous(
-                    trans="log10", name=self.qc_distribution_scale_y_name
+                    trans="log10", name=self.qc_distribution_scale_y_name,
+                    breaks = [10,100,1000,10000,100000,1e6,1e7]
                 )
                 .turn_x_axis_labels()
                 .hide_x_axis_title()
