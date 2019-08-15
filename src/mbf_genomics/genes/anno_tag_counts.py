@@ -45,10 +45,6 @@ class CounterStrategyStrandedRust(_CounterStrategyBase):
         from mbf_bam import count_reads_stranded
         import pprint
 
-        with open("/project/test_intervals", "w") as op:
-            op.write(pprint.pformat(intervals))
-        with open("/project/test_gene_intervals", "w") as op:
-            op.write(pprint.pformat(gene_intervals))
 
         res = count_reads_stranded(
             bam_filename, bam_index_name, intervals, gene_intervals
