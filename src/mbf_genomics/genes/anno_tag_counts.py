@@ -196,31 +196,35 @@ class TagCountCommonQC:
         def plot(output_filename, elements):
             df = genes.df
             df = dp(df).select({x.aligned_lane.name: x.columns[0] for x in elements}).pd
-            plot = (
-                dp(df)
-                .melt(var_name="sample", value_name="count")
-                .p9()
-                .theme_bw()
-                .annotation_stripes()
-            )
-            if ((df > 0).sum(axis=0) > 1).any():
-                plot = plot.geom_violin(dp.aes("sample", "count"), width=0.5)
-            print(df)
+            if len(df) == 0:
+                df = pd.DataFrame({"x": [0], "y": [0], "text": "no data"})
+                dp(df).p9().add_text("x", "y", "text").render(output_filename).pd
+            else:
+                plot_df = (
+                    dp(df)
+                    .melt(var_name="sample", value_name="count").pd)
 
-            return (
-                plot.add_boxplot(
-                    x="sample", y="count", _width=0.1, _fill=None, _color="blue"
+                plot = dp(plot_df).p9().theme_bw()
+
+                if ((df > 0).sum(axis=0) > 1).any():
+                    plot = plot.geom_violin(dp.aes("sample", "count"), width=0.5)
+                if (plot_df['count'] > 0).any():
+                    # can't have a log boxplot with all nans (log(0))
+                    plot = plot.scale_y_continuous(
+                        trans="log10",
+                        name=self.qc_distribution_scale_y_name,
+                        breaks=[1, 10, 100, 1000, 10000, 100_000, 1e6, 1e7],
+                    )
+
+                return (
+                    plot.add_boxplot(
+                        x="sample", y="count", _width=0.1, _fill=None, _color="blue"
+                    )
+                    .turn_x_axis_labels()
+                    .title("Raw read distribution")
+                    .hide_x_axis_title()
+                    .render(output_filename, width=0.2 * len(elements) + 1, height=4)
                 )
-                .scale_y_continuous(
-                    trans="log10",
-                    name=self.qc_distribution_scale_y_name,
-                    breaks=[1, 10, 100, 1000, 10000, 100_000, 1e6, 1e7],
-                )
-                .turn_x_axis_labels()
-                .title("Raw read distribution")
-                .hide_x_axis_title()
-                .render(output_filename, width=0.2 * len(elements) + 1, height=4)
-            )
 
         return register_qc(
             QCCollectingJob(output_filename, plot)
@@ -237,23 +241,25 @@ class TagCountCommonQC:
             if len(elements) == 1:
                 xy = np.array([[0], [0]]).transpose()
                 title = "PCA %s - fake / single sample" % genes.name
-
-            elif len(genes.df) == 0:
-                xy = np.array([[0] * len(elements), [0] * len(elements)]).transpose()
-                title = "PCA %s - fake / no rows" % genes.name
             else:
                 pca = decom.PCA(n_components=2, whiten=False)
                 data = genes.df[[x.columns[0] for x in elements]]
                 data -= data.min()  # min max scaling 0..1
                 data /= data.max()
                 data = data[~pd.isnull(data).any(axis=1)]  # can' do pca on NAN values
-                pca.fit(data.T)
-                xy = pca.transform(data.T)
-                title = "PCA %s\nExplained variance: x %.2f%%, y %.2f%%" % (
-                    genes.name,
-                    pca.explained_variance_ratio_[0] * 100,
-                    pca.explained_variance_ratio_[1] * 100,
-                )
+                if len(data):
+                    pca.fit(data.T)
+                    xy = pca.transform(data.T)
+                    title = "PCA %s\nExplained variance: x %.2f%%, y %.2f%%" % (
+                        genes.name,
+                        pca.explained_variance_ratio_[0] * 100,
+                        pca.explained_variance_ratio_[1] * 100,
+                    )
+                else:
+                    xy = np.array(
+                        [[0] * len(elements), [0] * len(elements)]
+                    ).transpose()
+                    title = "PCA %s - fake / no rows" % genes.name
 
             plot_df = pd.DataFrame(
                 {"x": xy[:, 0], "y": xy[:, 1], "label": [x.plot_name for x in elements]}
