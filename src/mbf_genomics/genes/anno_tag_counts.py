@@ -10,6 +10,7 @@ import hashlib
 import pandas as pd
 from pathlib import Path
 from dppd import dppd
+import dppd_plotnine  # noqa:F401
 from mbf_qualitycontrol import register_qc, QCCollectingJob, qc_disabled
 from mbf_genomics.util import parse_a_or_c_to_plot_name
 
@@ -186,7 +187,7 @@ class TagCountCommonQC:
         if not qc_disabled():
             self.register_qc_distribution(genes)
             self.register_qc_pca(genes)
-            #self.register_qc_cummulative(genes)
+            # self.register_qc_cummulative(genes)
 
     def register_qc_distribution(self, genes):
         output_filename = genes.result_dir / self.qc_folder / f"read_distribution.png"
@@ -204,16 +205,19 @@ class TagCountCommonQC:
             )
             if ((df > 0).sum(axis=0) > 1).any():
                 plot = plot.geom_violin(dp.aes("sample", "count"), width=0.5)
+            print(df)
 
             return (
                 plot.add_boxplot(
                     x="sample", y="count", _width=0.1, _fill=None, _color="blue"
                 )
                 .scale_y_continuous(
-                    trans="log10", name=self.qc_distribution_scale_y_name,
-                    breaks = [10,100,1000,10000,100000,1e6,1e7]
+                    trans="log10",
+                    name=self.qc_distribution_scale_y_name,
+                    breaks=[1, 10, 100, 1000, 10000, 100_000, 1e6, 1e7],
                 )
                 .turn_x_axis_labels()
+                .title("Raw read distribution")
                 .hide_x_axis_title()
                 .render(output_filename, width=0.2 * len(elements) + 1, height=4)
             )
@@ -233,6 +237,10 @@ class TagCountCommonQC:
             if len(elements) == 1:
                 xy = np.array([[0], [0]]).transpose()
                 title = "PCA %s - fake / single sample" % genes.name
+
+            elif len(genes.df) == 0:
+                xy = np.array([[0] * len(elements), [0] * len(elements)]).transpose()
+                title = "PCA %s - fake / no rows" % genes.name
             else:
                 pca = decom.PCA(n_components=2, whiten=False)
                 data = genes.df[[x.columns[0] for x in elements]]
@@ -246,9 +254,11 @@ class TagCountCommonQC:
                     pca.explained_variance_ratio_[0] * 100,
                     pca.explained_variance_ratio_[1] * 100,
                 )
+
             plot_df = pd.DataFrame(
                 {"x": xy[:, 0], "y": xy[:, 1], "label": [x.plot_name for x in elements]}
             )
+            print(plot_df)
             (
                 dp(plot_df)
                 .p9()
@@ -470,7 +480,7 @@ class NormalizationCPM(_NormalizationAnno):
 
     def calc(self, df):
         raw_counts = df[self.raw_column]
-        total = float(raw_counts.sum())
+        total = max(1, float(raw_counts.sum()))  # avoid division by 0
         result = raw_counts * (self.normalize_to / total)
         return pd.Series(result)
 

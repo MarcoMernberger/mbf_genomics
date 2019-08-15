@@ -1524,3 +1524,21 @@ class TestQC:
         qc_jobs = [x for x in qc_jobs if not x._pruned]
         assert len(qc_jobs) == 1
         assert_image_equal(qc_jobs[0].filenames[0])
+
+    def test_qc_pca_no_data(self):
+        import mbf_sampledata
+
+        ddf, a, b = mbf_sampledata.get_pasilla_data_subset()
+        ddf2 = ddf.filter("no_data", lambda df: [False] * len(df))
+        annos = []
+        for x in a + b:
+            anno = anno_tag_counts.NormalizationCPM(x)
+            ddf2 += anno
+            annos.append(anno)
+        ddf2.write()
+        prune_qc(lambda job: "pca" in job.job_id)
+        run_pipegraph()
+        qc_jobs = list(get_qc_jobs())
+        qc_jobs = [x for x in qc_jobs if not x._pruned]
+        assert len(qc_jobs) == 1
+        assert_image_equal(qc_jobs[0].filenames[0])
