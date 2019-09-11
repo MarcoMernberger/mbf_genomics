@@ -306,7 +306,7 @@ class Genes(GenomicRegions):
                 ):  # pragma: no cover
                     continue
                 tr = self.genome.transcripts[transcript_stable_id]
-                introns = tr.introns
+                introns = tr.introns_strict
                 cardinality = 0
                 for start, stop in introns:
                     res["chr"].append(transcript_row["chr"])

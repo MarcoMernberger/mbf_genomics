@@ -153,7 +153,7 @@ class IntervalStrategyIntron(_IntervalStrategy):
     def _get_interval_tuples_by_chr(self, genome):
         result = {chr: [] for chr in genome.get_chromosome_lengths()}
         for gene in genome.genes.values():
-            exons = gene.introns
+            exons = gene.introns_strict
             result[gene.chr].append(
                 (gene.gene_stable_id, gene.strand, list(exons[0]), list(exons[1]))
             )
@@ -189,14 +189,20 @@ class TagCountCommonQC:
 
         def plot(output_filename, elements):
             df = genes.df
-            return (
+            res = (
                 dp(df)
                 .select({x.aligned_lane.name: x.columns[0] for x in elements})
                 .melt(var_name="sample", value_name="count")
                 .p9()
                 .theme_bw()
                 .annotation_stripes()
-                .geom_violin(dp.aes("sample", "count"), width=0.5)
+            )
+            if len(X.data["count"].unique()) > 2:
+                raise ValueError(X.data["count"].unique())
+                res = res.geom_violin(dp.aes("sample", "count"), width=0.5)
+
+            return (
+                res
                 .add_boxplot(
                     x="sample", y="count", _width=0.1, _fill=None, _color="blue"
                 )
@@ -434,9 +440,7 @@ class _NormalizationAnno(Annotator, TagCountCommonQC):
             else:
                 self.qc_folder = f"normalized_{self.name}"
         else:
-            self.plot_name = parse_a_or_c_to_plot_name(
-                base_column_spec
-            )
+            self.plot_name = parse_a_or_c_to_plot_name(base_column_spec)
             self.qc_folder = f"normalized_{self.name}"
         self.qc_distribution_scale_y_name = self.name
 
