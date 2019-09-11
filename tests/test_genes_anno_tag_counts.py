@@ -1430,6 +1430,88 @@ class TestQC:
         assert_image_equal(tpm_job.filenames[0], "_tpm")
         assert_image_equal(cpm_job.filenames[0], "_cpm")
 
+    def test_qc_distribution_single_gene_sequenced(self):
+        from mbf_sampledata import get_human_22_fake_genome, get_sample_data
+        import mbf_align
+
+        genome = get_human_22_fake_genome()
+        lane = mbf_align.AlignedSample(
+            "test_lane",
+            get_sample_data(Path("mbf_align/rnaseq_spliced_chr22.bam")),
+            genome,
+            False,
+            "AA123",
+        )  # index creation is automatic
+        lane2 = mbf_align.AlignedSample(
+            "test_lane2",
+            get_sample_data(Path("mbf_align/rnaseq_spliced_chr22.bam")),
+            genome,
+            False,
+            "AA123",
+        )  # index creation is automatic
+        genes = Genes(genome)
+
+        def fake_calc(df):
+            result = np.zeros((len(df),), np.float)
+            result[2] = 1
+            return pd.Series(result)
+
+        for l in [lane, lane2]:
+            anno = anno_tag_counts.GeneUnstranded(l)
+            anno.calc = fake_calc
+            genes += anno
+
+        assert not qc_disabled()
+        prune_qc(lambda job: "read_distribution" in job.job_id)
+        run_pipegraph()
+        qc_jobs = list(get_qc_jobs())
+        qc_jobs = [x for x in qc_jobs if not x._pruned]
+        assert len(qc_jobs) == 1  # three from our annos, one gene_unsrtanded for
+
+        raw_job = qc_jobs[0]
+        assert_image_equal(raw_job.filenames[0])
+
+    def test_qc_distribution_no_data(self):
+        from mbf_sampledata import get_human_22_fake_genome, get_sample_data
+        import mbf_align
+
+        genome = get_human_22_fake_genome()
+        lane = mbf_align.AlignedSample(
+            "test_lane",
+            get_sample_data(Path("mbf_align/rnaseq_spliced_chr22.bam")),
+            genome,
+            False,
+            "AA123",
+        )  # index creation is automatic
+        lane2 = mbf_align.AlignedSample(
+            "test_lane2",
+            get_sample_data(Path("mbf_align/rnaseq_spliced_chr22.bam")),
+            genome,
+            False,
+            "AA123",
+        )  # index creation is automatic
+        genes = Genes(genome)
+        genes = genes.filter('none', lambda df: [False] * len(df))
+
+        def fake_calc(df):
+            result = np.zeros((len(df),), np.float)
+            return pd.Series(result)
+
+        for l in [lane, lane2]:
+            anno = anno_tag_counts.GeneUnstranded(l)
+            anno.calc = fake_calc
+            genes += anno
+
+        assert not qc_disabled()
+        prune_qc(lambda job: "read_distribution" in job.job_id and 'none' in job.job_id)
+        run_pipegraph()
+        qc_jobs = list(get_qc_jobs())
+        qc_jobs = [x for x in qc_jobs if not x._pruned]
+        assert len(qc_jobs) == 1  # three from our annos, one gene_unsrtanded for
+
+        raw_job = qc_jobs[0]
+        assert_image_equal(raw_job.filenames[0])
+
     def test_qc_pca(self):
         import mbf_sampledata
 
@@ -1478,6 +1560,24 @@ class TestQC:
             break
         prune_qc(lambda job: "pca" in job.job_id)
         ddf.write()
+        run_pipegraph()
+        qc_jobs = list(get_qc_jobs())
+        qc_jobs = [x for x in qc_jobs if not x._pruned]
+        assert len(qc_jobs) == 1
+        assert_image_equal(qc_jobs[0].filenames[0])
+
+    def test_qc_pca_no_data(self):
+        import mbf_sampledata
+
+        ddf, a, b = mbf_sampledata.get_pasilla_data_subset()
+        ddf2 = ddf.filter("no_data", lambda df: [False] * len(df))
+        annos = []
+        for x in a + b:
+            anno = anno_tag_counts.NormalizationCPM(x)
+            ddf2 += anno
+            annos.append(anno)
+        ddf2.write()
+        prune_qc(lambda job: "pca" in job.job_id)
         run_pipegraph()
         qc_jobs = list(get_qc_jobs())
         qc_jobs = [x for x in qc_jobs if not x._pruned]

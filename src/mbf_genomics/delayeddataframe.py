@@ -225,6 +225,7 @@ class DelayedDataFrame(object):
         functors = []
         annotators = []
         for column_name, op, threshold in definition:
+            anno = None
             if hasattr(self, "df") and column_name in self.df.columns:
                 # we can't check for non-annotator columns on filter
                 # definition in ppg ddfs that have not been loaded yet.

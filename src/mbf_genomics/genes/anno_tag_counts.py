@@ -10,6 +10,7 @@ import hashlib
 import pandas as pd
 from pathlib import Path
 from dppd import dppd
+import dppd_plotnine  # noqa:F401
 from mbf_qualitycontrol import register_qc, QCCollectingJob, qc_disabled
 from mbf_genomics.util import parse_a_or_c_to_plot_name
 
@@ -42,20 +43,14 @@ class CounterStrategyStrandedRust(_CounterStrategyBase):
         intervals = interval_strategy._get_interval_tuples_by_chr(genome)
         gene_intervals = IntervalStrategyGene()._get_interval_tuples_by_chr(genome)
         from mbf_bam import count_reads_stranded
-        import pprint
-
-        with open("/project/test_intervals", "w") as op:
-            op.write(pprint.pformat(intervals))
-        with open("/project/test_gene_intervals", "w") as op:
-            op.write(pprint.pformat(gene_intervals))
 
         res = count_reads_stranded(
             bam_filename, bam_index_name, intervals, gene_intervals
         )
-        self.sanity_check(res)
+        self.sanity_check(res, bam_filename)
         return res
 
-    def sanity_check(self, foward_and_reverse):
+    def sanity_check(self, foward_and_reverse, bam_filename):
         if self.disable_sanity_check:
             return
         error_count = 0
@@ -68,9 +63,13 @@ class CounterStrategyStrandedRust(_CounterStrategyBase):
             raise ValueError(
                 "Found at least %.2f%% of genes to have a reverse read count (%s) "
                 "above 110%% of the exon read count (and at least 100 tags). "
-                "This indicates that this lane should have been reversed before alignment. "
+                "This indicates that this lane (%s) should have been reversed before alignment. "
                 "Set reverse_reads=True on your Lane object"
-                % (100.0 * error_count / len(forward), self.__class__.__name__)
+                % (
+                    100.0 * error_count / len(forward),
+                    self.__class__.__name__,
+                    bam_filename,
+                )
             )
 
     def extract_lookup(self, data):
@@ -182,6 +181,7 @@ class TagCountCommonQC:
         if not qc_disabled():
             self.register_qc_distribution(genes)
             self.register_qc_pca(genes)
+            # self.register_qc_cummulative(genes)
 
     def register_qc_distribution(self, genes):
         output_filename = genes.result_dir / self.qc_folder / f"read_distribution.png"
@@ -189,30 +189,38 @@ class TagCountCommonQC:
 
         def plot(output_filename, elements):
             df = genes.df
-            res = (
-                dp(df)
-                .select({x.aligned_lane.name: x.columns[0] for x in elements})
-                .melt(var_name="sample", value_name="count")
-                .p9()
-                .theme_bw()
-                .annotation_stripes()
-            )
-            if len(X.data["count"].unique()) > 2:
-                raise ValueError(X.data["count"].unique())
-                res = res.geom_violin(dp.aes("sample", "count"), width=0.5)
+            df = dp(df).select({x.aligned_lane.name: x.columns[0] for x in elements}).pd
+            if len(df) == 0:
+                df = pd.DataFrame({"x": [0], "y": [0], "text": "no data"})
+                dp(df).p9().add_text("x", "y", "text").render(output_filename).pd
+            else:
+                plot_df = (
+                    dp(df)
+                    .melt(var_name="sample", value_name="count").pd)
 
-            return (
-                res
-                .add_boxplot(
-                    x="sample", y="count", _width=0.1, _fill=None, _color="blue"
+                plot = dp(plot_df).p9().theme_bw()
+
+                if ((df > 0).sum(axis=0) > 1).any():
+                    plot = plot.geom_violin(dp.aes("sample", "count"), width=0.5)
+                if len(plot_df['sample'].unique()) > 1:
+                    plot = plot.annotation_stripes(fill_range=True)
+                if (plot_df['count'] > 0).any():
+                    # can't have a log boxplot with all nans (log(0))
+                    plot = plot.scale_y_continuous(
+                        trans="log10",
+                        name=self.qc_distribution_scale_y_name,
+                        breaks=[1, 10, 100, 1000, 10000, 100_000, 1e6, 1e7],
+                    )
+
+                return (
+                    plot.add_boxplot(
+                        x="sample", y="count", _width=0.1, _fill=None, _color="blue"
+                    )
+                    .turn_x_axis_labels()
+                    .title("Raw read distribution")
+                    .hide_x_axis_title()
+                    .render(output_filename, width=0.2 * len(elements) + 1, height=4)
                 )
-                .scale_y_continuous(
-                    trans="log10", name=self.qc_distribution_scale_y_name
-                )
-                .turn_x_axis_labels()
-                .hide_x_axis_title()
-                .render(output_filename, width=0.2 * len(elements) + 1, height=4)
-            )
 
         return register_qc(
             QCCollectingJob(output_filename, plot)
@@ -235,16 +243,24 @@ class TagCountCommonQC:
                 data -= data.min()  # min max scaling 0..1
                 data /= data.max()
                 data = data[~pd.isnull(data).any(axis=1)]  # can' do pca on NAN values
-                pca.fit(data.T)
-                xy = pca.transform(data.T)
-                title = "PCA %s\nExplained variance: x %.2f%%, y %.2f%%" % (
-                    genes.name,
-                    pca.explained_variance_ratio_[0] * 100,
-                    pca.explained_variance_ratio_[1] * 100,
-                )
+                if len(data):
+                    pca.fit(data.T)
+                    xy = pca.transform(data.T)
+                    title = "PCA %s\nExplained variance: x %.2f%%, y %.2f%%" % (
+                        genes.name,
+                        pca.explained_variance_ratio_[0] * 100,
+                        pca.explained_variance_ratio_[1] * 100,
+                    )
+                else:
+                    xy = np.array(
+                        [[0] * len(elements), [0] * len(elements)]
+                    ).transpose()
+                    title = "PCA %s - fake / no rows" % genes.name
+
             plot_df = pd.DataFrame(
                 {"x": xy[:, 0], "y": xy[:, 1], "label": [x.plot_name for x in elements]}
             )
+            print(plot_df)
             (
                 dp(plot_df)
                 .p9()
@@ -466,7 +482,7 @@ class NormalizationCPM(_NormalizationAnno):
 
     def calc(self, df):
         raw_counts = df[self.raw_column]
-        total = float(raw_counts.sum())
+        total = max(1, float(raw_counts.sum()))  # avoid division by 0
         result = raw_counts * (self.normalize_to / total)
         return pd.Series(result)
 

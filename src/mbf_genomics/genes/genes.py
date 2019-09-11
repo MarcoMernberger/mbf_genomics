@@ -146,6 +146,12 @@ class Genes(GenomicRegions):
             self._already_inited = True
             self.vid = vid
 
+    def __str__(self):
+        return "Genes(%s)" % self.name
+
+    def __repr__(self):
+        return "Genes(%s)" % self.name
+
     def register(self):
         pass
 
@@ -306,7 +312,7 @@ class Genes(GenomicRegions):
                 ):  # pragma: no cover
                     continue
                 tr = self.genome.transcripts[transcript_stable_id]
-                introns = tr.introns_strict
+                introns = tr.introns
                 cardinality = 0
                 for start, stop in introns:
                     res["chr"].append(transcript_row["chr"])

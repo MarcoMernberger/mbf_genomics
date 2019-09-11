@@ -1,13 +1,14 @@
 from .genes import Genes
 from .genes_from import (
-    Genes_FromDifference,
-    Genes_FromIntersection,
-    Genes_FromAny,
-    Genes_FromAll,
-    Genes_FromNone,
-    Genes_FromFile,
-    Genes_FromFileOfTranscripts,
-    Genes_FromBiotypes,
+    FromDifference,
+    FromIntersection,
+    FromAny,
+    FromAll,
+    FromNone,
+    FromFile,
+    FromFileOfTranscripts,
+    FromBiotypes,
+    FromNames,
 )
 from . import anno_tag_counts
 from . import annotators
@@ -15,14 +16,15 @@ from . import annotators
 
 __all__ = [
     "Genes",
-    "Genes_FromDifference",
-    "Genes_FromIntersection",
-    "Genes_FromAny",
-    "Genes_FromAll",
-    "Genes_FromNone",
-    "Genes_FromFile",
-    "Genes_FromFileOfTranscripts",
-    "Genes_FromBiotypes",
+    "FromDifference",
+    "FromIntersection",
+    "FromAny",
+    "FromAll",
+    "FromNone",
+    "FromFile",
+    "FromFileOfTranscripts",
+    "FromBiotypes",
+    "FromNames",
     "anno_tag_counts",
     "annotators",
 ]
