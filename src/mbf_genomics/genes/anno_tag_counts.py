@@ -270,10 +270,11 @@ class TagCountCommonQC:
                     "x",
                     "y",
                     "label",
-                    _adjust_text={
-                        "expand_points": (2, 2),
-                        "arrowprops": {"arrowstyle": "->", "color": "red"},
-                    },
+                    # cool, this can go into an endless loop...
+                    #_adjust_text={
+                        #"expand_points": (2, 2),
+                        #"arrowprops": {"arrowstyle": "->", "color": "red"},
+                    #},
                 )
                 .scale_color_many_categories()
                 .title(title)
