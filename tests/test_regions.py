@@ -2594,3 +2594,90 @@ class TestOutsideOfPipegraph:
         assert counter[0] == 1
         a.load()
         assert counter[0] == 1
+
+
+class TestTagCountAnnotator:
+    def test_simple(self, new_pipegraph):
+        from .test_genes_anno_tag_counts import MockBam, MockLane
+        from mbf_genomics import genes
+
+        mb = MockBam("1", 10050, mode=0)
+        genome = MockGenome(
+            pd.DataFrame(
+                [
+                    {
+                        "stable_id": "fake1",
+                        "chr": "1",
+                        "strand": 1,
+                        "tss": 5000,
+                        "tes": 5500,
+                        "description": "bla",
+                    }
+                ]
+            ),
+            chr_lengths={"1": 10050},
+        )
+        a = regions.GenomicRegions_BinnedGenome(genome, 1000, ["1"])
+        mb_lane = MockLane(mb, genome)
+        anno = genes.anno_tag_counts.GRUnstrandedRust(mb_lane)
+        a.add_annotator(anno)
+        force_load(a.annotate)
+        new_pipegraph.run()
+        assert (a.df[anno.columns[0]] == [1000] * 10 + [50]).all()
+
+    def test_both_strands(self, new_pipegraph):
+        from .test_genes_anno_tag_counts import MockBam, MockLane
+        from mbf_genomics import genes
+
+        mb = MockBam("1", 10050, mode=1)
+        genome = MockGenome(
+            pd.DataFrame(
+                [
+                    {
+                        "stable_id": "fake1",
+                        "chr": "1",
+                        "strand": 1,
+                        "tss": 5000,
+                        "tes": 5500,
+                        "description": "bla",
+                    }
+                ]
+            ),
+            chr_lengths={"1": 10050},
+        )
+        a = regions.GenomicRegions_BinnedGenome(genome, 1000, ["1"])
+        mb_lane = MockLane(mb, genome)
+        anno = genes.anno_tag_counts.GRUnstrandedRust(mb_lane)
+        a.add_annotator(anno)
+        force_load(a.annotate)
+        new_pipegraph.run()
+        assert (a.df[anno.columns[0]] == [2000] * 10 + [50 * 2]).all()
+
+    def test_both_strands_stranded(self, new_pipegraph):
+        from .test_genes_anno_tag_counts import MockBam, MockLane
+        from mbf_genomics import genes
+
+        mb = MockBam("1", 10050, mode=1)
+        genome = MockGenome(
+            pd.DataFrame(
+                [
+                    {
+                        "stable_id": "fake1",
+                        "chr": "1",
+                        "strand": 1,
+                        "tss": 5000,
+                        "tes": 5500,
+                        "description": "bla",
+                    }
+                ]
+            ),
+            chr_lengths={"1": 10050},
+        )
+        a = regions.GenomicRegions_BinnedGenome(genome, 1000, ["1"])
+        b = regions.GenomicRegions("B", lambda: a.df.assign(strand=1), [a.load()], genome)
+        mb_lane = MockLane(mb, genome)
+        anno = genes.anno_tag_counts.GRStrandedRust(mb_lane)
+        b.add_annotator(anno)
+        force_load(b.annotate)
+        new_pipegraph.run()
+        assert (b.df[anno.columns[0]] == [1000] * 10 + [50 * 1]).all()

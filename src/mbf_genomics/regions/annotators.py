@@ -21,3 +21,7 @@ class SummitMiddle(SummitBase):
         for dummy_idx, row in df.iterrows():
             res.append((row["stop"] + row["start"]) / 2 - row["start"])
         return pd.Series(res)
+
+
+from ..genes.anno_tag_counts import GRUnstrandedRust as TagCount
+from ..genes.anno_tag_counts import GRStrandedRust as TagCountStranded

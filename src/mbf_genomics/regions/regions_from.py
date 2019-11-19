@@ -265,7 +265,7 @@ def GenomicRegions_BinnedGenome(
             no_of_bins = int(math.ceil(float(chr_len) / bin_size))
             data["chr"].extend([chr] * no_of_bins)
             starts = np.array(range(0, chr_len, bin_size))
-            stops = starts + bin_size - 1
+            stops = starts + bin_size  # not -1, we are right exclusive!
             data["start"].extend(starts)
             data["stop"].extend(stops)
         res = pd.DataFrame(data)
@@ -422,7 +422,7 @@ def GenomicRegions_Invert(new_name, gr, summit_annotator=None, sheet_name="Inver
         gr.genome,
         on_overlap="raise",
         summit_annotator=summit_annotator,
-        vid=["invert"] + gr.vid,
+        vid=(["invert"] + gr.vid) if gr.vid is not None else None,
         sheet_name=sheet_name,
     )
     return result

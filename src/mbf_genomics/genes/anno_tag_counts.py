@@ -115,6 +115,31 @@ class _IntervalStrategy:
     def _get_interval_tuples_by_chr(self, genome):  # pragma: no cover
         raise NotImplementedError()
 
+    def get_deps(self):
+        return []
+
+
+class IntervalStrategyGenomicRegion(_IntervalStrategy):
+    """Used internally by _FastTagCounterGR"""
+
+    def __init__(self, gr):
+        self.gr = gr
+        self.name = f"GR_{gr.name}"
+
+    def _get_interval_tuples_by_chr(self, genome):
+        result = {chr: [] for chr in genome.get_chromosome_lengths()}
+        if self.gr.genome != genome:  # pragma: no cover
+            raise ValueError("Mismatched genomes")
+        df = self.gr.df
+        if not "strand" in df.columns:
+            df = df.assign(strand=1)
+        df = df[["chr", "start", "stop", "strand"]]
+        if df.index.duplicated().any():
+            raise ValueError("index must be unique")
+        for tup in df.itertuples():
+            result[tup.chr].append((str(tup[0]), tup.strand, [tup.start], [tup.stop]))
+        return result
+
 
 class IntervalStrategyGene(_IntervalStrategy):
     """Count from TSS to TES"""
@@ -194,23 +219,25 @@ class TagCountCommonQC:
                 df = pd.DataFrame({"x": [0], "y": [0], "text": "no data"})
                 dp(df).p9().add_text("x", "y", "text").render(output_filename).pd
             else:
-                plot_df = (
-                    dp(df)
-                    .melt(var_name="sample", value_name="count").pd)
+                plot_df = dp(df).melt(var_name="sample", value_name="count").pd
 
                 plot = dp(plot_df).p9().theme_bw()
+                print(df)
 
-                if ((df > 0).sum(axis=0) > 1).any():
-                    plot = plot.geom_violin(dp.aes("sample", "count"), width=0.5)
-                if len(plot_df['sample'].unique()) > 1:
+                if ((df > 0).sum(axis=0) > 1).any() and len(df) > 1:
+                    plot = plot.geom_violin(
+                        dp.aes(x="sample", y="count"), width=0.5, bw=0.1
+                    )
+                if len(plot_df["sample"].unique()) > 1:
                     plot = plot.annotation_stripes(fill_range=True)
-                if (plot_df['count'] > 0).any():
+                if (plot_df["count"] > 0).any():
                     # can't have a log boxplot with all nans (log(0))
                     plot = plot.scale_y_continuous(
                         trans="log10",
                         name=self.qc_distribution_scale_y_name,
                         breaks=[1, 10, 100, 1000, 10000, 100_000, 1e6, 1e7],
                     )
+                print(plot_df)
 
                 return (
                     plot.add_boxplot(
@@ -271,10 +298,10 @@ class TagCountCommonQC:
                     "y",
                     "label",
                     # cool, this can go into an endless loop...
-                    #_adjust_text={
-                        #"expand_points": (2, 2),
-                        #"arrowprops": {"arrowstyle": "->", "color": "red"},
-                    #},
+                    # _adjust_text={
+                    # "expand_points": (2, 2),
+                    # "arrowprops": {"arrowstyle": "->", "color": "red"},
+                    # },
                 )
                 .scale_color_many_categories()
                 .title(title)
@@ -344,6 +371,64 @@ class _FastTagCounter(Annotator, TagCountCommonQC):
         )
 
 
+class _FastTagCounterGR(Annotator):
+    def __init__(self, aligned_lane, count_strategy, column_name, column_desc):
+        if not hasattr(aligned_lane, "get_bam"):
+            raise ValueError("_FastTagCounter only accepts aligned lanes!")
+        self.aligned_lane = aligned_lane
+        self.genome = self.aligned_lane.genome
+        self.count_strategy = count_strategy
+        self.columns = [(column_name % (self.aligned_lane.name,)).strip()]
+        self.cache_name = (
+            "FT_%s_%s" % (count_strategy.name, "on_gr")
+            + "_"
+            + hashlib.md5(self.columns[0].encode("utf-8")).hexdigest()
+        )
+        self.column_properties = {self.columns[0]: {"description": column_desc}}
+        self.vid = aligned_lane.vid
+        self.cores_needed = count_strategy.cores_needed
+        self.plot_name = self.aligned_lane.name
+        # self.qc_folder = f"{self.count_strategy.name}_{self.interval_strategy.name}"
+        # self.qc_distribution_scale_y_name = "raw counts"
+
+    def calc(self, df):
+        if ppg.inside_ppg():
+            data = self._data
+        else:
+            data = self.calc_data()
+        lookup = self.count_strategy.extract_lookup(data)
+        result = []
+        for idx in df.index:
+            result.append(lookup.get(str(idx), 0))
+        result = np.array(result, dtype=np.float)
+        return pd.Series(result)
+
+    def deps(self, gr):
+        return [self.load_data(gr)]
+
+    def calc_data(self, gr):
+        def inner():
+            bam_file, bam_index_name = self.aligned_lane.get_bam_names()
+            return self.count_strategy.count_reads(
+                IntervalStrategyGenomicRegion(gr), self.genome, bam_file, bam_index_name
+            )
+
+        return inner
+
+    def load_data(self, gr):
+        cf = gr.cache_dir
+        cf.mkdir(exist_ok=True)
+        return (
+            ppg.CachedAttributeLoadingJob(
+                cf / self.cache_name, self, "_data", self.calc_data(gr)
+            )
+            .depends_on(self.aligned_lane.load())
+            .depends_on(gr.load())
+            .use_cores(-1)  # should be count_strategy cores needed, no?
+        )
+
+
+#
 # ## Raw tag count annos for analysis usage
 
 
@@ -417,6 +502,24 @@ class GeneUnstrandedRust(_FastTagCounter):
             "Gene unstranded tag count %s",
             "Tag count inside gene body (tss..tes), both strands",
         )
+
+
+def GRUnstrandedRust(aligned_lane):
+    return _FastTagCounterGR(
+        aligned_lane,
+        CounterStrategyUnstrandedRust(),
+        "Tag count %s",
+        "Tag count inside region, both strands",
+    )
+
+
+def GRStrandedRust(aligned_lane):
+    return _FastTagCounterGR(
+        aligned_lane,
+        CounterStrategyStrandedRust(),
+        "Tag count %s",
+        "Tag count inside region, stranded",
+    )
 
 
 # we are keeping the python ones for now as reference implementations

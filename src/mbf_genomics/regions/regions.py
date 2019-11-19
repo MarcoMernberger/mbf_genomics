@@ -9,7 +9,6 @@ from collections.abc import Iterator
 from mbf_genomics.delayeddataframe import DelayedDataFrame
 from mbf_genomes import GenomeBase
 from mbf_externals.util import lazy_property
-from .annotators import SummitMiddle
 from mbf_nested_intervals import (
     merge_df_intervals,
     merge_df_intervals_with_callback,
@@ -199,6 +198,7 @@ class GenomicRegions(DelayedDataFrame):
         elif summit_annotator is False:
             self.summit_annotator = None
         else:
+            from .annotators import SummitMiddle
             self.summit_annotator = SummitMiddle()
         if self.summit_annotator is not None:
             self.add_annotator(self.summit_annotator)
