@@ -556,7 +556,11 @@ class _NormalizationAnno(Annotator, TagCountCommonQC):
         if self.raw_anno is not None:
             self.plot_name = getattr(self.raw_anno, "plot_name", self.raw_column)
             if hasattr(self.raw_anno, "count_strategy"):
-                self.qc_folder = f"normalized_{self.name}_{self.raw_anno.count_strategy.name}_{self.raw_anno.interval_strategy.name}"
+                if hasattr(self.raw_anno, "interval_strategy"):
+                    iv_name = self.raw_anno.interval_strategy.name
+                else:
+                    iv_name = "-"
+                self.qc_folder = f"normalized_{self.name}_{self.raw_anno.count_strategy.name}_{iv_name}"
             else:
                 self.qc_folder = f"normalized_{self.name}"
         else:
@@ -575,7 +579,7 @@ class NormalizationCPM(_NormalizationAnno):
     """Normalize to 1e6 by taking the sum of all genes"""
 
     def __init__(self, base_column_spec):
-        self.name = "CPM"
+        self.name = "CPM(lane"
         self.normalize_to = 1e6
         super().__init__(base_column_spec)
         self.column_properties = {

@@ -25,3 +25,24 @@ class SummitMiddle(SummitBase):
 
 from ..genes.anno_tag_counts import GRUnstrandedRust as TagCount
 from ..genes.anno_tag_counts import GRStrandedRust as TagCountStranded
+from ..genes.anno_tag_counts import _NormalizationAnno
+
+
+class NormalizationCPM(_NormalizationAnno):
+    """Normalize to 1e6 by taking the sum of all genes"""
+
+    def __init__(self, base_column_spec):
+        self.name = "CPM(lane)"
+        self.normalize_to = 1e6
+        super().__init__(base_column_spec)
+        self.column_properties = {
+            self.columns[0]: {"description": "Tag count normalized to lane tag count"}
+        }
+
+    def calc(self, df):
+        raw_counts = df[self.raw_column]
+        total = max(
+            1, sum((x.mapped for x in self.raw_anno.aligned_lane.get_bam().get_index_statistics()))
+        )
+        result = raw_counts * (self.normalize_to / total)
+        return pd.Series(result)
