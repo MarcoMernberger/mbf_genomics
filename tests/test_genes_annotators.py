@@ -6,6 +6,7 @@ from mbf_genomics.testing import MockGenome
 from pypipegraph.testing import force_load
 from pathlib import Path
 
+
 @pytest.mark.usefixtures("new_pipegraph")
 class TestDescription:
     def test_simple(self):

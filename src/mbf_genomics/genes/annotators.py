@@ -4,6 +4,7 @@ from typing import List
 import pandas as pd
 import numpy as np
 
+
 class Description(Annotator):
     """Add the description for the genes from genome.
 
