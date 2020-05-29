@@ -20,7 +20,7 @@ from .regions_from import (
     GenomicRegions_FilterRemoveOverlapping,
     GenomicRegions_FilterToOverlapping,
 )
-from . import annotators
+# from . import annotators
 
 
 __all__ = [

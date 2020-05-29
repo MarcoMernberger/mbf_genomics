@@ -23,8 +23,8 @@ class SummitMiddle(SummitBase):
         return pd.Series(res)
 
 
-from ..genes.anno_tag_counts import GRUnstrandedRust as TagCount
-from ..genes.anno_tag_counts import GRStrandedRust as TagCountStranded
+# from ..genes.anno_tag_counts import GRUnstrandedRust as TagCount
+# from ..genes.anno_tag_counts import GRStrandedRust as TagCountStranded
 from ..genes.anno_tag_counts import _NormalizationAnno
 
 
